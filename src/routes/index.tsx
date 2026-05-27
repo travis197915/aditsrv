@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import NotFound from '@/components/NotFound';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import LoginRoute from '@/routes/login';
+import RegisterRoute from '@/routes/register';
 import ClaimsListingPage from '@/routes/claims';
 import ClaimDetailsPage from '@/routes/claims/[id]';
 import ProfilePage from '@/routes/profile';
@@ -10,6 +11,7 @@ export default function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginRoute />} />
+      <Route path="/register" element={<RegisterRoute />} />
 
       <Route element={<ProtectedRoute />}>
         <Route path="/" element={<Navigate to="/claims" replace />} />

@@ -6,7 +6,7 @@ import { authApi } from '@/lib/api';
 import { getRoleLabel } from '@/types';
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, canWrite } = useAuth();
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -61,7 +61,7 @@ export default function ProfilePage() {
             </div>
             <div>
               <div className="text-base font-semibold text-gray-900">{user?.name || '—'}</div>
-              <div className="text-sm text-gray-500">{getRoleLabel(user?.role ?? 'USER')}</div>
+              <div className="text-sm text-gray-500">{getRoleLabel(user?.role ?? 'AUDITOR')}</div>
             </div>
           </div>
 
@@ -84,7 +84,7 @@ export default function ProfilePage() {
               <Shield className="h-4 w-4 text-gray-400 shrink-0" />
               <div>
                 <div className="text-xs font-medium text-gray-500 mb-0.5">Role</div>
-                <div className="text-sm text-gray-800">{getRoleLabel(user?.role ?? 'USER')}</div>
+                <div className="text-sm text-gray-800">{getRoleLabel(user?.role ?? 'AUDITOR')}</div>
               </div>
             </div>
             {user?.createdAt && (
@@ -102,6 +102,7 @@ export default function ProfilePage() {
         </div>
 
         {/* Change password card */}
+        {canWrite && (
         <div className="bg-white border border-gray-200 rounded p-6">
           <h2 className="text-base font-semibold text-gray-900 mb-4">Change Password</h2>
           <form onSubmit={handleChangePassword} className="space-y-4">
@@ -159,6 +160,7 @@ export default function ProfilePage() {
             </button>
           </form>
         </div>
+        )}
       </div>
     </TopNavLayout>
   );

@@ -5,6 +5,7 @@ import TopNavLayout from '@/layouts/TopNavLayout';
 import { AiStatusChip } from '@/components/StatusChip';
 import { getClaimDetail } from '@/data/dummy-claims';
 import type { AgentExecution, AiPlatformStatus } from '@/types';
+import { useAuth } from '@/contexts/AuthContext';
 
 const ORANGE = '#FF612B';
 
@@ -109,6 +110,7 @@ const LEFT_NAV_ITEMS = [
 
 export default function ClaimDetailsPage() {
   const { id: claimId } = useParams<{ id: string }>();
+  const { canWrite } = useAuth();
   const detail = getClaimDetail(claimId ?? '');
 
   const [activeNav, setActiveNav] = useState('agents');
@@ -206,7 +208,8 @@ export default function ClaimDetailsPage() {
               )}
             </div>
 
-            {/* Feedback + actions — inside panel footer */}
+            {/* Feedback + actions — admins only */}
+            {canWrite && (
             <div className="border-t border-[#e8ddd4] px-4 py-4 bg-[#fafafa]">
               <label className="block text-sm font-medium text-gray-800 mb-2">
                 Feedback: <span className="text-red-500">*</span>
@@ -236,6 +239,7 @@ export default function ClaimDetailsPage() {
                 </button>
               </div>
             </div>
+            )}
           </div>
         </div>
       </div>

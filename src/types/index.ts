@@ -1,25 +1,32 @@
+export type UserRole = 'ADMIN' | 'AUDITOR';
+
 export interface User {
   id: string;
   email: string | null;
   name: string | null;
   status: string;  // 'ACTIVE' | 'INACTIVE' | 'PENDING' | 'SUSPENDED' | 'DELETED'
-  role: string;    // 'USER' | 'ADMIN'
+  role: UserRole;
   lastLoginAt?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
 }
 
-export type RoleRequirement = 'ADMIN' | 'USER';
+export type RoleRequirement = 'ADMIN' | 'AUDITOR';
 
 /** Check if user has admin role */
 export const isAdmin = (role: string) => role === 'ADMIN';
 
+export const isAuditor = (role: string) => role === 'AUDITOR';
+
+/** Only admins may perform write / mutate operations. */
+export const canWrite = (role: string) => isAdmin(role);
+
 /** Format role enum to display label */
 export const getRoleLabel = (role: string): string => {
   switch (role) {
-    case 'ADMIN': return 'Admin';
-    case 'USER':  return 'User';
-    default:      return role;
+    case 'ADMIN':   return 'Admin';
+    case 'AUDITOR': return 'Auditor';
+    default:        return role;
   }
 };
 

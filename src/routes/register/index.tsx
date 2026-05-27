@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { FormPanel, FormInput } from '@/components/FormPanel';
-import { AuthLayout } from '../../layouts/AuthLayout';
+import { AuthLayout } from '@/layouts/AuthLayout';
 
-export default function Login() {
-  const { user, login, isLoading } = useAuth();
+export default function Register() {
+  const { user, register, isLoading } = useAuth();
   const [error, setError] = useState<string | undefined>();
 
   if (user) {
@@ -17,24 +17,25 @@ export default function Login() {
     try {
       const email = String(data.email ?? '').trim();
       const password = String(data.password ?? '');
+      const name = String(data.name ?? '').trim();
       if (!email || !password) {
         throw new Error('Email and password are required');
       }
-      await login(email, password);
+      await register(email, password, name || undefined);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Login failed. Please try again.');
+      setError(e instanceof Error ? e.message : 'Registration failed. Please try again.');
     }
   };
 
   return (
     <AuthLayout
-      title="Sign in"
-      subtitle="Access your Claims Audit Review dashboard"
+      title="Create account"
+      subtitle="New accounts receive auditor access by default"
       footer={
         <p className="mt-6 text-center text-sm text-muted-foreground">
-          Don&apos;t have an account?{' '}
-          <Link to="/register" className="font-medium text-[#FF612B] hover:text-[#e5551f] transition-colors">
-            Sign up
+          Already have an account?{' '}
+          <Link to="/login" className="font-medium text-[#FF612B] hover:text-[#e5551f] transition-colors">
+            Sign in
           </Link>
         </p>
       }
@@ -43,8 +44,15 @@ export default function Login() {
         onSubmit={handleSubmit}
         loading={isLoading}
         error={error}
-        submitButtonLabel="Sign in"
+        submitButtonLabel="Sign up"
       >
+        <FormInput
+          fieldName="name"
+          label="Full name"
+          type="text"
+          defaultValue=""
+          placeholder="Jane Doe"
+        />
         <FormInput
           fieldName="email"
           label="Work email"
