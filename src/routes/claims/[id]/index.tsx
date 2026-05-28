@@ -1,21 +1,23 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp, Clock, Check, X } from 'lucide-react';
 import TopNavLayout from '@/layouts/TopNavLayout';
 import { AiStatusChip } from '@/components/StatusChip';
-import { getClaimDetail } from '@/data/dummy-claims';
-import type { AgentExecution, AiPlatformStatus } from '@/types';
+import { getClaimProcessing } from '@/lib/execute';
+import type { ClaimProcessingAgent } from '@/types/execute';
+import type { AiPlatformStatus } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
+import { getToken } from '@/utils/auth';
 
 const ORANGE = '#FF612B';
 
-function AgentCard({ agent, defaultExpanded }: { agent: AgentExecution; defaultExpanded: boolean }) {
+function AgentCard({ agent, defaultExpanded }: { agent: ClaimProcessingAgent; defaultExpanded: boolean }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [activeTab, setActiveTab] = useState<'execution' | 'step'>('execution');
 
   return (
     <div className="border border-[#e8ddd4] bg-white">
-      {/* Card header — always visible */}
       <button
         type="button"
         onClick={() => setExpanded((e) => !e)}
@@ -39,15 +41,12 @@ function AgentCard({ agent, defaultExpanded }: { agent: AgentExecution; defaultE
 
       {expanded && (
         <div className="border-t border-[#e8ddd4]">
-          {/* Internal tabs */}
           <div className="flex px-4 pt-3 gap-0">
             <button
               type="button"
               onClick={() => setActiveTab('execution')}
               className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
-                activeTab === 'execution'
-                  ? 'text-white'
-                  : 'text-[#FF612B] bg-transparent'
+                activeTab === 'execution' ? 'text-white' : 'text-[#FF612B] bg-transparent'
               }`}
               style={activeTab === 'execution' ? { backgroundColor: ORANGE } : undefined}
             >
@@ -57,9 +56,7 @@ function AgentCard({ agent, defaultExpanded }: { agent: AgentExecution; defaultE
               type="button"
               onClick={() => setActiveTab('step')}
               className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
-                activeTab === 'step'
-                  ? 'text-white'
-                  : 'text-[#FF612B] bg-transparent'
+                activeTab === 'step' ? 'text-white' : 'text-[#FF612B] bg-transparent'
               }`}
               style={activeTab === 'step' ? { backgroundColor: ORANGE } : undefined}
             >
@@ -110,15 +107,56 @@ const LEFT_NAV_ITEMS = [
 
 export default function ClaimDetailsPage() {
   const { id: claimId } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const { canWrite } = useAuth();
-  const detail = getClaimDetail(claimId ?? '');
+  const token = getToken();
+  const batchId = searchParams.get('batchId') ?? undefined;
+  const runId = searchParams.get('runId') ?? undefined;
+
+  const detailQuery = useQuery({
+    queryKey: ['claim-processing', claimId, batchId, runId],
+    queryFn: () =>
+      getClaimProcessing(token!, claimId!, { batchId, runId }),
+    enabled: !!token && !!claimId,
+  });
 
   const [activeNav, setActiveNav] = useState('agents');
-  const [feedback, setFeedback] = useState(detail.feedback ?? '');
+  const [feedback, setFeedback] = useState('');
+
+  if (detailQuery.isLoading) {
+    return (
+      <TopNavLayout showBack>
+        <div className="p-6 bg-white border border-gray-200 rounded text-sm text-gray-500">
+          Loading claim details...
+        </div>
+      </TopNavLayout>
+    );
+  }
+
+  if (detailQuery.error) {
+    return (
+      <TopNavLayout showBack>
+        <div className="p-6 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+          {(detailQuery.error as Error).message}
+        </div>
+      </TopNavLayout>
+    );
+  }
+
+  if (!detailQuery.data) {
+    return (
+      <TopNavLayout showBack>
+        <div className="p-6 bg-white border border-gray-200 rounded text-sm text-gray-700">
+          No execution found for this claim.
+        </div>
+      </TopNavLayout>
+    );
+  }
+
+  const detail = detailQuery.data;
 
   return (
     <TopNavLayout showBack>
-      {/* Page header */}
       <div className="mb-4">
         <h1 className="text-xl font-semibold text-gray-900">Claim Details</h1>
         <p className="text-sm text-gray-500 mt-0.5">
@@ -126,7 +164,6 @@ export default function ClaimDetailsPage() {
         </p>
       </div>
 
-      {/* Claim metadata row */}
       <div className="flex flex-wrap items-start gap-x-10 gap-y-3 mb-5">
         <div>
           <div className="text-sm text-gray-600 mb-1">Claim ID :</div>
@@ -134,11 +171,15 @@ export default function ClaimDetailsPage() {
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Execution ID :</div>
-          <div className="text-sm text-gray-800">{detail.executionId}</div>
+          <div className="text-sm text-gray-800">{detail.runId}</div>
+        </div>
+        <div>
+          <div className="text-sm text-gray-600 mb-1">Batch ID :</div>
+          <div className="text-sm text-gray-800 font-mono text-xs">{detail.batchId}</div>
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Claim Status :</div>
-          <AiStatusChip status={detail.claimStatus} />
+          <AiStatusChip status={detail.claimStatus as AiPlatformStatus} />
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Processing Time :</div>
@@ -147,12 +188,14 @@ export default function ClaimDetailsPage() {
             {detail.processingTimeMin} min
           </div>
         </div>
+        <div>
+          <div className="text-sm text-gray-600 mb-1">Finished At :</div>
+          <div className="text-sm text-gray-800">{detail.finishedAt}</div>
+        </div>
       </div>
 
-      {/* Main bordered panel — matches screenshot */}
       <div className="border border-[#FF612B]/60 rounded-sm bg-white overflow-hidden">
         <div className="flex min-h-[420px]">
-          {/* Left vertical tabs */}
           <div className="w-[220px] shrink-0 flex flex-col border-r border-[#e8ddd4]">
             {LEFT_NAV_ITEMS.map((item) => {
               const isActive = activeNav === item.id;
@@ -174,7 +217,6 @@ export default function ClaimDetailsPage() {
             })}
           </div>
 
-          {/* Right content */}
           <div className="flex-1 min-w-0 flex flex-col">
             <div className="flex-1 p-4">
               {activeNav === 'agents' ? (
@@ -188,7 +230,34 @@ export default function ClaimDetailsPage() {
                   ))}
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-6">
+                  {detail.outerToolInvocations.length > 0 ? (
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-900 mb-2">Outer Tool Invocations</h4>
+                      <div className="border border-gray-200 rounded overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-gray-50 border-b border-gray-200">
+                              <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Phase</th>
+                              <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Tool</th>
+                              <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Status</th>
+                              <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Duration (ms)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {detail.outerToolInvocations.map((inv, i) => (
+                              <tr key={i} className="border-b border-gray-100 last:border-0">
+                                <td className="px-3 py-1.5 text-gray-800">{inv.phase}</td>
+                                <td className="px-3 py-1.5 text-gray-600">{inv.tool}</td>
+                                <td className="px-3 py-1.5 text-gray-600">{inv.status}</td>
+                                <td className="px-3 py-1.5 text-gray-600 tabular-nums">{inv.durationMs}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
                   {detail.agents.map((agent) => (
                     <div key={agent.id}>
                       <div className="flex items-center gap-2 mb-2">
@@ -208,37 +277,37 @@ export default function ClaimDetailsPage() {
               )}
             </div>
 
-            {/* Feedback + actions — admins only */}
             {canWrite && (
-            <div className="border-t border-[#e8ddd4] px-4 py-4 bg-[#fafafa]">
-              <label className="block text-sm font-medium text-gray-800 mb-2">
-                Feedback: <span className="text-red-500">*</span>
-              </label>
-              <textarea
-                value={feedback}
-                onChange={(e) => setFeedback(e.target.value)}
-                rows={3}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded bg-white resize-none focus:outline-none focus:ring-1 focus:ring-[#FF612B] focus:border-[#FF612B]"
-              />
-              <div className="flex justify-end gap-3 mt-3">
-                <button
-                  type="button"
-                  disabled={!feedback.trim()}
-                  className="inline-flex items-center gap-2 px-6 py-2 text-sm font-medium text-white bg-[#4caf7a] hover:bg-[#43a06d] disabled:opacity-50 disabled:cursor-not-allowed rounded-full transition-colors"
-                >
-                  <Check className="h-4 w-4" />
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  disabled={!feedback.trim()}
-                  className="inline-flex items-center gap-2 px-6 py-2 text-sm font-medium text-white bg-[#e57373] hover:bg-[#ef5350] disabled:opacity-50 disabled:cursor-not-allowed rounded-full transition-colors"
-                >
-                  <X className="h-4 w-4" />
-                  Reject
-                </button>
+              <div className="border-t border-[#e8ddd4] px-4 py-4 bg-[#fafafa]">
+                <label className="block text-sm font-medium text-gray-800 mb-2">
+                  Feedback: <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={feedback}
+                  onChange={(e) => setFeedback(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded bg-white resize-none focus:outline-none focus:ring-1 focus:ring-[#FF612B] focus:border-[#FF612B]"
+                />
+                <p className="text-xs text-gray-500 mt-2">Review submission not wired yet.</p>
+                <div className="flex justify-end gap-3 mt-3">
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex items-center gap-2 px-6 py-2 text-sm font-medium text-white bg-[#4caf7a] hover:bg-[#43a06d] disabled:opacity-50 disabled:cursor-not-allowed rounded-full transition-colors"
+                  >
+                    <Check className="h-4 w-4" />
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex items-center gap-2 px-6 py-2 text-sm font-medium text-white bg-[#e57373] hover:bg-[#ef5350] disabled:opacity-50 disabled:cursor-not-allowed rounded-full transition-colors"
+                  >
+                    <X className="h-4 w-4" />
+                    Reject
+                  </button>
+                </div>
               </div>
-            </div>
             )}
           </div>
         </div>

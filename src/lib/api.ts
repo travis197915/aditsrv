@@ -1,6 +1,6 @@
 import { clearAuth, getToken } from '@/utils/auth';
 
-const AUTH_BASE_URL = (
+export const API_BASE = (
   import.meta.env.VITE_API_BASE_URL ??
   'http://localhost:4000'
 ).replace(/\/+$/, '');
@@ -82,7 +82,7 @@ function makeClient(baseUrl: string) {
   };
 }
 
-export const authApi = makeClient(AUTH_BASE_URL);
+export const authApi = makeClient(API_BASE);
 
 export interface CorebackendUser {
   id: string;

@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
   Search, ChevronLeft, ChevronRight, Upload,
@@ -7,10 +8,23 @@ import {
 import TopNavLayout from '@/layouts/TopNavLayout';
 import { AiStatusChip, ReviewStatusChip } from '@/components/StatusChip';
 import DateFilterInput from '@/components/DateFilterInput';
-import { CLAIMS, CLAIM_STATS } from '@/data/dummy-claims';
-import type { ClaimRecord, AiPlatformStatus } from '@/types';
+import RunBatchModal from '@/components/RunBatchModal';
+import { useAuth } from '@/contexts/AuthContext';
+import { getBatch } from '@/lib/execute';
+import { getLastBatchId } from '@/lib/lastBatch';
+import { getToken } from '@/utils/auth';
+import type { ClaimStatus, RunSummary } from '@/types/execute';
+import type { AiPlatformStatus, ReviewStatus } from '@/types';
 
-// ── Stat Card ───────────────────────────────────────────────────────────────
+type BatchTableRow = {
+  claimId: string;
+  runId: string;
+  batchId: string;
+  claimStatus: ClaimStatus;
+  runStatus: string;
+  processingTimeMin: number;
+  finishedAt: string;
+};
 
 function StatCard({
   icon: Icon,
@@ -38,14 +52,37 @@ function StatCard({
   );
 }
 
-// ── Main page ───────────────────────────────────────────────────────────────
+function isClaimStatus(value: string): value is ClaimStatus {
+  return value === 'MET' || value === 'NOT_MET' || value === 'INCONCLUSIVE' || value === 'DEFECT';
+}
+
+function mapRunToRow(run: RunSummary, batchId: string, idx: number): BatchTableRow {
+  const claimId = String(run.claim_id ?? run.claimId ?? `claim-${idx + 1}`);
+  const runId = String(run.run_id ?? run.runId ?? run.id ?? '');
+  const statusRaw = String(run.claim_status ?? run.status ?? 'INCONCLUSIVE');
+  return {
+    claimId,
+    runId,
+    batchId,
+    claimStatus: isClaimStatus(statusRaw) ? statusRaw : 'INCONCLUSIVE',
+    runStatus: String(run.run_status ?? run.status ?? ''),
+    processingTimeMin: Number(run.processing_time_min ?? run.transaction_time_min ?? 0),
+    finishedAt: String(run.finished_at ?? ''),
+  };
+}
+
+function reviewStatusDisplay(): ReviewStatus {
+  return 'PENDING';
+}
 
 const ROWS_PER_PAGE_OPTIONS = [10, 25, 50, 100];
 
 export default function ClaimsListingPage() {
   const navigate = useNavigate();
+  const { canWrite } = useAuth();
+  const token = getToken();
 
-  // Filter state
+  const [lastBatchId, setLastBatchId] = useState<string | null>(() => getLastBatchId());
   const [searchClaimId, setSearchClaimId] = useState('');
   const [reviewStatusFilter, setReviewStatusFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -54,20 +91,62 @@ export default function ClaimsListingPage() {
   const [appliedFilters, setAppliedFilters] = useState({
     searchClaimId: '',
     reviewStatus: '',
-    status: '',
+    status: '' as ClaimStatus | '',
     fromDate: '',
     toDate: '',
   });
 
-  // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [runBatchOpen, setRunBatchOpen] = useState(false);
+  const [runBatchOpenId, setRunBatchOpenId] = useState(0);
+
+  const openRunBatchModal = () => {
+    setRunBatchOpenId((n) => n + 1);
+    setRunBatchOpen(true);
+  };
+
+  const handleModalClose = () => {
+    setRunBatchOpen(false);
+    setLastBatchId(getLastBatchId());
+  };
+
+  const batchQuery = useQuery({
+    queryKey: ['batch', lastBatchId],
+    queryFn: () => getBatch(token!, lastBatchId!),
+    enabled: !!token && !!lastBatchId,
+  });
+
+  const allRows = useMemo(() => {
+    if (!lastBatchId) return [];
+    return (batchQuery.data?.runs ?? []).map((run, idx) => mapRunToRow(run, lastBatchId, idx));
+  }, [batchQuery.data?.runs, lastBatchId]);
+
+  const filteredRows = useMemo(() => {
+    return allRows.filter((row) => {
+      if (appliedFilters.searchClaimId &&
+          !row.claimId.toLowerCase().includes(appliedFilters.searchClaimId.toLowerCase())) {
+        return false;
+      }
+      if (appliedFilters.status && row.claimStatus !== appliedFilters.status) return false;
+      if (appliedFilters.reviewStatus && reviewStatusDisplay() !== appliedFilters.reviewStatus) {
+        return false;
+      }
+      return true;
+    });
+  }, [allRows, appliedFilters]);
+
+  const total = filteredRows.length;
+  const totalPages = Math.max(1, Math.ceil(total / rowsPerPage));
+  const startIdx = (currentPage - 1) * rowsPerPage;
+  const pageRows = filteredRows.slice(startIdx, startIdx + rowsPerPage);
+  const endIdx = Math.min(startIdx + rowsPerPage, total);
 
   const handleApply = () => {
     setAppliedFilters({
       searchClaimId,
       reviewStatus: reviewStatusFilter,
-      status: statusFilter,
+      status: statusFilter as ClaimStatus | '',
       fromDate,
       toDate,
     });
@@ -84,58 +163,59 @@ export default function ClaimsListingPage() {
     setCurrentPage(1);
   };
 
-  const filtered = useMemo(() => {
-    return CLAIMS.filter((c) => {
-      if (appliedFilters.searchClaimId && !c.claimId.toLowerCase().includes(appliedFilters.searchClaimId.toLowerCase())) return false;
-      if (appliedFilters.reviewStatus && c.reviewStatus !== appliedFilters.reviewStatus) return false;
-      if (appliedFilters.status && c.aiPlatformStatus !== appliedFilters.status) return false;
-      return true;
-    });
-  }, [appliedFilters]);
-
-  const totalPages = Math.ceil(filtered.length / rowsPerPage);
-  const startIdx = (currentPage - 1) * rowsPerPage;
-  const endIdx = Math.min(startIdx + rowsPerPage, filtered.length);
-  const pageRows = filtered.slice(startIdx, endIdx);
-
-  const pageNumbers = useMemo(() => {
+  const pageNumbers = (() => {
     const pages: (number | '...')[] = [];
     if (totalPages <= 7) {
       for (let i = 1; i <= totalPages; i++) pages.push(i);
     } else {
       pages.push(1);
       if (currentPage > 3) pages.push('...');
-      for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) pages.push(i);
+      for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) {
+        pages.push(i);
+      }
       if (currentPage < totalPages - 2) pages.push('...');
       pages.push(totalPages);
     }
     return pages;
-  }, [totalPages, currentPage]);
+  })();
 
-  const handleRowClick = (claim: ClaimRecord) => {
-    navigate(`/claims/${claim.claimId}`);
+  const avgProcessingTime = allRows.length
+    ? Math.round((allRows.reduce((sum, row) => sum + row.processingTimeMin, 0) / allRows.length) * 10) / 10
+    : 0;
+
+  const handleRowClick = (row: BatchTableRow) => {
+    const params = new URLSearchParams({ batchId: row.batchId });
+    if (row.runId) params.set('runId', row.runId);
+    navigate(`/claims/${encodeURIComponent(row.claimId)}?${params.toString()}`);
   };
 
   return (
     <TopNavLayout>
-      {/* Page header */}
       <div className="mb-5">
         <h1 className="text-xl font-semibold text-gray-900">Claims Audit Review</h1>
         <p className="text-sm text-gray-500 mt-0.5">Review and Audit behavioural health claims.</p>
       </div>
 
-      {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <StatCard icon={ClipboardList} label="Total Claims Audited" value={CLAIM_STATS.totalClaims} />
-        <StatCard icon={TrendingUp}   label="Accuracy"             value={CLAIM_STATS.accuracy} suffix="%" />
-        <StatCard icon={Clock}        label="Average Processing Time" value={CLAIM_STATS.avgProcessingTime} suffix=" min" />
+        <StatCard icon={ClipboardList} label="Claims in Last Batch" value={allRows.length} />
+        <StatCard icon={TrendingUp} label="Accuracy" value="—" />
+        <StatCard icon={Clock} label="Avg Processing Time" value={avgProcessingTime} suffix=" min" />
       </div>
 
-      {/* Main card */}
+      {!lastBatchId && (
+        <div className="mb-4 p-3 border border-gray-200 bg-white rounded text-sm text-gray-600">
+          {canWrite ? 'No batch loaded — click Upload to run a workflow batch.' : 'No batch loaded yet.'}
+        </div>
+      )}
+
+      {batchQuery.error && (
+        <div className="mb-4 p-3 border border-red-200 bg-red-50 rounded text-sm text-red-700">
+          {(batchQuery.error as Error).message}
+        </div>
+      )}
+
       <div className="bg-white border border-gray-200 rounded">
-        {/* Filter bar */}
         <div className="p-4 border-b border-gray-200 flex flex-wrap items-end gap-2">
-          {/* Claim ID search */}
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
             <input
@@ -147,7 +227,6 @@ export default function ClaimsListingPage() {
             />
           </div>
 
-          {/* Review Status dropdown */}
           <select
             value={reviewStatusFilter}
             onChange={(e) => setReviewStatusFilter(e.target.value)}
@@ -159,7 +238,6 @@ export default function ClaimsListingPage() {
             <option value="REJECTED">Rejected</option>
           </select>
 
-          {/* Status dropdown */}
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -172,13 +250,9 @@ export default function ClaimsListingPage() {
             <option value="DEFECT">Defect</option>
           </select>
 
-          {/* From Platform Date */}
           <DateFilterInput value={fromDate} onChange={setFromDate} />
-
-          {/* To Platform Date */}
           <DateFilterInput value={toDate} onChange={setToDate} />
 
-          {/* Action buttons */}
           <button
             onClick={handleApply}
             className="px-4 py-1.5 text-sm font-medium text-white bg-[#FF612B] hover:bg-[#e5561f] rounded transition-colors"
@@ -191,29 +265,29 @@ export default function ClaimsListingPage() {
           >
             Clear
           </button>
-          <button className="flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded transition-colors">
-            <Upload className="h-3.5 w-3.5" />
-            Upload
-          </button>
+          {canWrite && (
+            <button
+              type="button"
+              onClick={openRunBatchModal}
+              className="flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded transition-colors"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              Upload
+            </button>
+          )}
         </div>
 
-        {/* Table */}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-100 border-b border-gray-200">
                 {[
                   'CLAIM ID',
-                  'TOTAL BILLED AMOUNT',
-                  'TOTAL PAID AMOUNT',
-                  'PAID DATE',
-                  'PLATFORM DATE',
-                  'CLAIM AUDITED DATE',
-                  'AUDITOR STATUS',
-                  'AI PLATFORM STATUS',
+                  'RUN STATUS',
+                  'CLAIM STATUS',
                   'REVIEW STATUS',
-                  'TRANSACTION TIME(MINS)',
-                  'ACCURACY',
+                  'PROCESSING TIME (MIN)',
+                  'FINISHED AT',
                 ].map((col) => (
                   <th
                     key={col}
@@ -225,48 +299,53 @@ export default function ClaimsListingPage() {
               </tr>
             </thead>
             <tbody>
-              {pageRows.map((claim, idx) => (
-                <tr
-                  key={`${claim.claimId}-${idx}`}
-                  onClick={() => handleRowClick(claim)}
-                  className="border-b border-gray-100 hover:bg-orange-50/40 cursor-pointer transition-colors"
-                >
-                  <td className="px-3 py-2 text-gray-800 font-medium whitespace-nowrap">{claim.claimId}</td>
-                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{claim.totalBilledAmount ?? ''}</td>
-                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{claim.totalPaidAmount ?? ''}</td>
-                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{claim.paidDate ?? ''}</td>
-                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{claim.platformDate}</td>
-                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{claim.claimAuditedDate}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    <AiStatusChip status={claim.auditorStatus as AiPlatformStatus} />
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    <AiStatusChip status={claim.aiPlatformStatus} />
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    <ReviewStatusChip status={claim.reviewStatus} />
-                  </td>
-                  <td className="px-3 py-2 text-gray-600 tabular-nums">{claim.transactionTime}</td>
-                  <td className="px-3 py-2 text-gray-600 tabular-nums">{claim.accuracy}%</td>
-                </tr>
-              ))}
-              {pageRows.length === 0 && (
+              {!lastBatchId ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-10 text-center text-sm text-gray-400">
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-400">
+                    Run a batch to populate the audit review table.
+                  </td>
+                </tr>
+              ) : batchQuery.isLoading ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-400">
+                    Loading batch runs...
+                  </td>
+                </tr>
+              ) : pageRows.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-400">
                     No claims found matching your filters.
                   </td>
                 </tr>
+              ) : (
+                pageRows.map((row) => (
+                  <tr
+                    key={`${row.claimId}-${row.runId}`}
+                    onClick={() => handleRowClick(row)}
+                    className="border-b border-gray-100 hover:bg-orange-50/40 cursor-pointer transition-colors"
+                  >
+                    <td className="px-3 py-2 text-gray-800 font-medium whitespace-nowrap">{row.claimId}</td>
+                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.runStatus}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <AiStatusChip status={row.claimStatus as AiPlatformStatus} />
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <ReviewStatusChip status={reviewStatusDisplay()} />
+                    </td>
+                    <td className="px-3 py-2 text-gray-600 tabular-nums">{row.processingTimeMin}</td>
+                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.finishedAt}</td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
         </div>
 
-        {/* Pagination */}
         <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 flex-wrap gap-2">
           <div className="flex items-center gap-1">
             <button
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
+              disabled={currentPage === 1 || batchQuery.isLoading}
               className="p-1 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <ChevronLeft className="h-4 w-4 text-gray-600" />
@@ -292,7 +371,7 @@ export default function ClaimsListingPage() {
 
             <button
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages || totalPages === 0}
+              disabled={currentPage >= totalPages || batchQuery.isLoading || total === 0}
               className="p-1 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <ChevronRight className="h-4 w-4 text-gray-600" />
@@ -301,7 +380,7 @@ export default function ClaimsListingPage() {
 
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-500">
-              Showing {filtered.length === 0 ? 0 : startIdx + 1}–{endIdx} of {filtered.length} entries
+              Showing {total === 0 ? 0 : startIdx + 1}–{endIdx} of {total} entries
             </span>
             <div className="flex items-center gap-2">
               <select
@@ -318,6 +397,14 @@ export default function ClaimsListingPage() {
           </div>
         </div>
       </div>
+
+      {canWrite && (
+        <RunBatchModal
+          key={runBatchOpenId}
+          open={runBatchOpen}
+          onClose={handleModalClose}
+        />
+      )}
     </TopNavLayout>
   );
 }
