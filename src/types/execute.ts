@@ -1,7 +1,12 @@
 export type BatchEventType =
   | 'batch_start'
+  | 'claim_start'
   | 'shape_start'
+  | 'shape_complete'
   | 'rule_evaluated'
+  | 'tool_invoked'
+  | 'stage'
+  | 'agent_log'
   | 'claim'
   | 'summary'
   | 'error'
@@ -80,6 +85,21 @@ export interface ClaimProcessingAgentStep {
   details: string;
 }
 
+export interface RuleEvaluationDetail {
+  orderIndex: number;
+  ruleKey: string;
+  ruleSource: string;
+  condition: string;
+  action: string;
+  matched: boolean;
+  decisionType: string;
+  confidence: number;
+  reasoning: string;
+  codes: string[];
+  llmProvider: string;
+  llmMs: number;
+}
+
 export interface ClaimProcessingAgent {
   id: string;
   agentName: string;
@@ -89,6 +109,7 @@ export interface ClaimProcessingAgent {
   durationSec: number;
   processSummary: string[];
   steps: ClaimProcessingAgentStep[];
+  evaluations?: RuleEvaluationDetail[];
 }
 
 export interface OuterToolInvocation {

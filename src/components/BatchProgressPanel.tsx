@@ -66,10 +66,20 @@ function eventBadgeClasses(type: string): string {
   switch (type) {
     case 'batch_start':
       return 'bg-blue-50 text-blue-700 border-blue-200';
+    case 'claim_start':
+      return 'bg-sky-50 text-sky-700 border-sky-200';
     case 'shape_start':
       return 'bg-purple-50 text-purple-700 border-purple-200';
+    case 'shape_complete':
+      return 'bg-indigo-50 text-indigo-700 border-indigo-200';
     case 'rule_evaluated':
       return 'bg-amber-50 text-amber-700 border-amber-200';
+    case 'tool_invoked':
+      return 'bg-cyan-50 text-cyan-700 border-cyan-200';
+    case 'stage':
+      return 'bg-stone-50 text-stone-700 border-stone-200';
+    case 'agent_log':
+      return 'bg-slate-50 text-slate-700 border-slate-200';
     case 'claim':
       return 'bg-orange-50 text-[#FF612B] border-orange-200';
     case 'summary':
@@ -81,37 +91,139 @@ function eventBadgeClasses(type: string): string {
   }
 }
 
+function eventClaimId(data: unknown): string {
+  if (!isPlainObject(data)) return '';
+  return asString(data.claim_id) ?? asString(data.claimId) ?? '';
+}
+
 function summarizeEvent(event: BatchEvent): string {
   const { data } = event;
   if (typeof data === 'string') return data;
   if (!isPlainObject(data)) return '';
 
+  const claim = eventClaimId(data);
+  const claimPrefix = claim ? `${claim} · ` : '';
+
+  if (event.type === 'batch_start') {
+    const total = data.total_claims ?? data.total;
+    const wf = asString(data.workflow_id) ?? '';
+    const parts = [
+      total != null ? `${total} claims` : null,
+      wf ? `workflow ${wf.slice(0, 8)}` : null,
+    ].filter(Boolean);
+    return parts.join(' · ');
+  }
+
+  if (event.type === 'claim_start') {
+    return claim || 'claim';
+  }
+
   if (event.type === 'claim') {
-    const id = asString(data.claim_id) ?? asString(data.claimId) ?? '?';
     const s = asString(data.status) ?? '';
-    return `${id}${s ? ` · ${s}` : ''}`;
+    const decision = asString(data.final_decision_type) ?? '';
+    return [claim || '?', s, decision].filter(Boolean).join(' · ');
   }
 
   if (event.type === 'shape_start') {
-    return asString(data.shape_name) ?? asString(data.name) ?? '';
+    const label =
+      asString(data.shape_label) ??
+      asString(data.shape_name) ??
+      asString(data.name) ??
+      asString(data.shape_id) ??
+      'shape';
+    const total = data.rules_total;
+    const tail = typeof total === 'number' ? ` (${total} rules)` : '';
+    const skipped = data.skipped ? ' — skipped' : '';
+    return `${claimPrefix}${label}${tail}${skipped}`;
+  }
+
+  if (event.type === 'shape_complete') {
+    const label =
+      asString(data.shape_label) ?? asString(data.shape_id) ?? 'shape';
+    const evaluated = data.rules_evaluated;
+    const total = data.rules_total;
+    const matched = data.matched_count;
+    const term = data.terminated_here ? ' → TERMINATED' : '';
+    const ms = data.duration_ms;
+    const counts =
+      typeof evaluated === 'number' && typeof total === 'number'
+        ? ` ${evaluated}/${total} rules`
+        : '';
+    const matchStr =
+      typeof matched === 'number' ? `, ${matched} matched` : '';
+    const msStr = typeof ms === 'number' ? ` (${ms} ms)` : '';
+    return `${claimPrefix}${label}${counts}${matchStr}${msStr}${term}`;
   }
 
   if (event.type === 'rule_evaluated') {
-    const rule = asString(data.rule_name) ?? asString(data.rule) ?? 'rule';
-    const result = asString(data.result) ?? '';
-    return `${rule}${result ? ` · ${result}` : ''}`;
+    const rule =
+      asString(data.rule_key) ??
+      asString(data.rule_name) ??
+      asString(data.rule) ??
+      'rule';
+    const matched = data.matched;
+    const decision = asString(data.decision_type) ?? '';
+    const verdict =
+      matched === true ? 'matched' : matched === false ? 'no match' : '';
+    const reason = asString(data.reasoning) ?? '';
+    const head = [verdict, decision].filter(Boolean).join(' · ');
+    const tail = reason ? ` — ${reason}` : '';
+    return `${claimPrefix}${rule} · ${head}${tail}`;
+  }
+
+  if (event.type === 'tool_invoked') {
+    const tool = asString(data.tool_name) ?? 'tool';
+    const phase = asString(data.phase) ?? '';
+    const ok = data.ok === true ? 'OK' : data.ok === false ? 'FAIL' : '';
+    const ms = data.duration_ms;
+    const err = asString(data.error) ?? '';
+    const head = [tool, phase, ok].filter(Boolean).join(' · ');
+    const tail =
+      err ? ` · ${err}` : typeof ms === 'number' ? ` · ${ms} ms` : '';
+    return `${claimPrefix}${head}${tail}`;
+  }
+
+  if (event.type === 'stage') {
+    const node = asString(data.node) ?? 'stage';
+    const status = asString(data.status) ?? '';
+    const ms = data.ms;
+    const msg = asString(data.message) ?? '';
+    const head = [node, status].filter(Boolean).join(' · ');
+    const tail = msg
+      ? ` — ${msg}`
+      : typeof ms === 'number'
+        ? ` (${ms} ms)`
+        : '';
+    return `${claimPrefix}${head}${tail}`;
+  }
+
+  if (event.type === 'agent_log') {
+    const level = asString(data.level) ?? 'INFO';
+    const category = asString(data.category) ?? '';
+    const msg = asString(data.message) ?? '';
+    const head = [level, category].filter(Boolean).join('/');
+    return `${claimPrefix}[${head}] ${msg}`;
   }
 
   if (event.type === 'summary') {
-    const total = data.total ?? data.total_runs;
-    const ok = data.met ?? data.passed;
-    const fail = data.not_met ?? data.failed;
+    // Backend sends: { id, status, total_claims, completed, failed,
+    //                  error_message }. Older callers used { total, met,
+    //                  not_met } — accept both.
+    const total = data.total_claims ?? data.total ?? data.total_runs;
+    const completed = data.completed ?? data.met ?? data.passed;
+    const failed = data.failed ?? data.not_met;
+    const status = asString(data.status) ?? '';
+    const err = asString(data.error_message) ?? '';
     const parts = [
-      total != null ? `total ${total}` : null,
-      ok != null ? `met ${ok}` : null,
-      fail != null ? `not_met ${fail}` : null,
+      status || null,
+      total != null
+        ? `${total} claim${Number(total) === 1 ? '' : 's'}`
+        : null,
+      completed != null ? `${completed} completed` : null,
+      failed != null && Number(failed) > 0 ? `${failed} failed` : null,
     ].filter(Boolean);
-    if (parts.length > 0) return parts.join(' · ');
+    const head = parts.length > 0 ? parts.join(' · ') : '';
+    return err ? `${head}${head ? ' — ' : ''}${err}` : head;
   }
 
   if (event.type === 'error') {
@@ -120,6 +232,8 @@ function summarizeEvent(event: BatchEvent): string {
 
   return '';
 }
+
+const VERBOSE_TYPES = new Set<string>(['agent_log']);
 
 export default function BatchProgressPanel({
   token,
@@ -152,7 +266,12 @@ export default function BatchProgressPanel({
     return rows;
   }, [events]);
 
-  const reversedEvents = useMemo(() => [...events].reverse(), [events]);
+  const [showVerbose, setShowVerbose] = useState(false);
+  const filteredEvents = useMemo(
+    () => (showVerbose ? events : events.filter((e) => !VERBOSE_TYPES.has(e.type))),
+    [events, showVerbose],
+  );
+  const reversedEvents = useMemo(() => [...filteredEvents].reverse(), [filteredEvents]);
 
   const summary = useMemo(
     () => [...events].reverse().find((ev) => ev.type === 'summary'),
@@ -199,7 +318,10 @@ export default function BatchProgressPanel({
         <div className="mx-5 mt-4 px-3 py-2 border border-green-200 bg-green-50 rounded flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-sm text-green-700">
             <CheckCircle2 className="h-4 w-4" />
-            <span>Batch finished. {summarizeEvent(summary)}</span>
+            <span>
+              Batch finished
+              {summarizeEvent(summary) ? ` — ${summarizeEvent(summary)}` : ''}
+            </span>
           </div>
           <button
             type="button"
@@ -284,21 +406,48 @@ export default function BatchProgressPanel({
         </section>
 
         <section>
-          <h3 className="text-sm font-semibold text-gray-900 mb-2">Event log</h3>
-          <div className="border border-gray-200 rounded p-2 space-y-1 max-h-[320px] overflow-auto">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-900">
+              Event log{' '}
+              <span className="text-xs font-normal text-gray-500">
+                ({filteredEvents.length}
+                {showVerbose ? '' : ` of ${events.length}`})
+              </span>
+            </h3>
+            <label className="inline-flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={showVerbose}
+                onChange={(e) => setShowVerbose(e.target.checked)}
+                className="h-3.5 w-3.5 accent-[#FF612B]"
+              />
+              Show agent logs
+            </label>
+          </div>
+          <div className="border border-gray-200 rounded divide-y divide-gray-100 max-h-[360px] overflow-auto bg-white">
             {reversedEvents.length === 0 ? (
-              <p className="text-xs text-gray-400 text-center py-6">No events yet</p>
+              <p className="text-xs text-gray-400 text-center py-8">No events yet</p>
             ) : (
-              reversedEvents.map((ev, i) => (
-                <div key={`${ev.type}-${i}`} className="flex items-start gap-2 text-xs">
-                  <span
-                    className={`inline-flex items-center px-1.5 py-0.5 rounded border font-medium ${eventBadgeClasses(ev.type)}`}
+              reversedEvents.map((ev, i) => {
+                const summary = summarizeEvent(ev);
+                return (
+                  <div
+                    key={`${ev.type}-${i}`}
+                    className="flex items-start gap-2 px-2 py-1.5 text-xs hover:bg-gray-50"
                   >
-                    {ev.type}
-                  </span>
-                  <span className="text-gray-600 break-all">{summarizeEvent(ev)}</span>
-                </div>
-              ))
+                    <span
+                      className={`inline-flex items-center shrink-0 px-1.5 py-0.5 rounded border font-medium font-mono ${eventBadgeClasses(ev.type)}`}
+                    >
+                      {ev.type}
+                    </span>
+                    <span className="text-gray-700 wrap-break-word leading-snug min-w-0">
+                      {summary || (
+                        <span className="text-gray-400 italic">no payload</span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })
             )}
           </div>
         </section>

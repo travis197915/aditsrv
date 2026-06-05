@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, ChevronUp, Clock, Check, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Clock, Check, X, Loader2 } from 'lucide-react';
 import TopNavLayout from '@/layouts/TopNavLayout';
 import { AiStatusChip } from '@/components/StatusChip';
 import { getClaimProcessing } from '@/lib/execute';
+import { useLiveClaimRun, liveShapeToAgent } from '@/lib/useLiveClaimRun';
 import type { ClaimProcessingAgent } from '@/types/execute';
 import type { AiPlatformStatus } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
@@ -14,7 +15,8 @@ const ORANGE = '#FF612B';
 
 function AgentCard({ agent, defaultExpanded }: { agent: ClaimProcessingAgent; defaultExpanded: boolean }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
-  const [activeTab, setActiveTab] = useState<'execution' | 'step'>('execution');
+  const [activeTab, setActiveTab] = useState<'execution' | 'rules' | 'step'>('rules');
+  const evaluations = agent.evaluations ?? [];
 
   return (
     <div className="border border-[#e8ddd4] bg-white">
@@ -44,13 +46,23 @@ function AgentCard({ agent, defaultExpanded }: { agent: ClaimProcessingAgent; de
           <div className="flex px-4 pt-3 gap-0">
             <button
               type="button"
+              onClick={() => setActiveTab('rules')}
+              className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
+                activeTab === 'rules' ? 'text-white' : 'text-[#FF612B] bg-transparent'
+              }`}
+              style={activeTab === 'rules' ? { backgroundColor: ORANGE } : undefined}
+            >
+              Rule Evaluations ({evaluations.length})
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveTab('execution')}
               className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
                 activeTab === 'execution' ? 'text-white' : 'text-[#FF612B] bg-transparent'
               }`}
               style={activeTab === 'execution' ? { backgroundColor: ORANGE } : undefined}
             >
-              Agents Execution
+              Process Summary
             </button>
             <button
               type="button"
@@ -65,7 +77,96 @@ function AgentCard({ agent, defaultExpanded }: { agent: ClaimProcessingAgent; de
           </div>
 
           <div className="px-4 pb-4 pt-3">
-            {activeTab === 'execution' ? (
+            {activeTab === 'rules' ? (
+              evaluations.length === 0 ? (
+                <div className="text-sm text-gray-500 py-4">
+                  No rule evaluations recorded for this node.
+                </div>
+              ) : (
+                <ol className="space-y-3">
+                  {evaluations.map((ev) => (
+                    <li
+                      key={`${ev.orderIndex}:${ev.ruleKey}`}
+                      className="border border-[#e8ddd4] bg-[#fafafa] rounded p-3"
+                    >
+                      <div className="flex flex-wrap items-center gap-2 mb-2">
+                        <span className="text-xs font-mono text-gray-500">
+                          #{ev.orderIndex + 1}
+                        </span>
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded ${
+                            ev.matched
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-gray-100 text-gray-700'
+                          }`}
+                        >
+                          {ev.matched ? (
+                            <>
+                              <Check className="h-3 w-3" /> matched
+                            </>
+                          ) : (
+                            <>
+                              <X className="h-3 w-3" /> not matched
+                            </>
+                          )}
+                        </span>
+                        {ev.matched && ev.decisionType ? (
+                          <span className="px-2 py-0.5 text-xs font-medium rounded bg-orange-100 text-[#FF612B]">
+                            {ev.decisionType}
+                          </span>
+                        ) : null}
+                        <span className="text-xs text-gray-500">
+                          source: {ev.ruleSource || '—'}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          confidence: {(ev.confidence * 100).toFixed(0)}%
+                        </span>
+                        <span className="text-xs text-gray-400 ml-auto font-mono">
+                          {ev.llmProvider || '—'} · {ev.llmMs} ms
+                        </span>
+                      </div>
+                      {ev.condition ? (
+                        <div className="mb-1">
+                          <span className="text-xs font-semibold text-gray-600">IF: </span>
+                          <span className="text-xs text-gray-800">{ev.condition}</span>
+                        </div>
+                      ) : null}
+                      {ev.action ? (
+                        <div className="mb-2">
+                          <span className="text-xs font-semibold text-gray-600">THEN: </span>
+                          <span className="text-xs text-gray-800">{ev.action}</span>
+                        </div>
+                      ) : null}
+                      {ev.reasoning ? (
+                        <div className="mt-2 pt-2 border-t border-[#e8ddd4]">
+                          <div className="text-xs font-semibold text-gray-700 mb-1">
+                            Agent reasoning
+                          </div>
+                          <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">
+                            {ev.reasoning}
+                          </p>
+                        </div>
+                      ) : null}
+                      {ev.codes.length > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {ev.codes.map((c) => (
+                            <span
+                              key={c}
+                              className="px-1.5 py-0.5 text-[10px] font-mono bg-white border border-gray-200 rounded text-gray-700"
+                            >
+                              {c}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <div className="mt-2 text-[10px] font-mono text-gray-400 truncate">
+                        {ev.ruleKey}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )
+            ) : activeTab === 'execution' ? (
               <div>
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-sm text-gray-700">Execution Status:</span>
@@ -118,22 +219,62 @@ export default function ClaimDetailsPage() {
     queryFn: () =>
       getClaimProcessing(token!, claimId!, { batchId, runId }),
     enabled: !!token && !!claimId,
+    // While the snapshot reports a still-running claim (or no snapshot yet
+    // exists), poll briefly as a backstop so the persisted view catches up
+    // even if a terminal SSE event is missed.
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!batchId) return false;
+      if (!data) return 4000;
+      if (!data.finishedAt) return 4000;
+      return false;
+    },
+  });
+
+  // "Live mode" engages when we have a batch context AND the snapshot
+  // isn't finalized for this claim. Subscribe to the batch SSE, accumulate
+  // this claim's events, and merge them into the rendered agents list.
+  const liveEnabled =
+    !!token &&
+    !!claimId &&
+    !!batchId &&
+    (!detailQuery.data || !detailQuery.data.finishedAt);
+
+  const live = useLiveClaimRun({
+    token,
+    claimId: claimId ?? '',
+    batchId,
+    enabled: liveEnabled,
   });
 
   const [activeNav, setActiveNav] = useState('agents');
   const [feedback, setFeedback] = useState('');
 
-  if (detailQuery.isLoading) {
+  // Merge: snapshot agents are authoritative; shapes the live stream has
+  // seen but the snapshot doesn't yet include get appended.
+  const mergedAgents: ClaimProcessingAgent[] = useMemo(() => {
+    const fromSnapshot = detailQuery.data?.agents ?? [];
+    const snapshotIds = new Set(fromSnapshot.map((a) => a.id));
+    const liveOnly = live.shapes
+      .filter((s) => !snapshotIds.has(s.shapeId))
+      .map(liveShapeToAgent);
+    return [...fromSnapshot, ...liveOnly];
+  }, [detailQuery.data, live.shapes]);
+
+  // Initial spinner: only while the snapshot is loading AND no live event
+  // has arrived. Once SSE starts streaming we have something to render.
+  if (detailQuery.isLoading && live.shapes.length === 0) {
     return (
       <TopNavLayout showBack>
-        <div className="p-6 bg-white border border-gray-200 rounded text-sm text-gray-500">
-          Loading claim details...
+        <div className="p-6 bg-white border border-gray-200 rounded text-sm text-gray-500 flex items-center gap-2">
+          <Loader2 className="h-4 w-4 animate-spin text-[#FF612B]" />
+          Loading claim details…
         </div>
       </TopNavLayout>
     );
   }
 
-  if (detailQuery.error) {
+  if (detailQuery.error && live.shapes.length === 0) {
     return (
       <TopNavLayout showBack>
         <div className="p-6 bg-red-50 border border-red-200 rounded text-sm text-red-700">
@@ -143,25 +284,67 @@ export default function ClaimDetailsPage() {
     );
   }
 
-  if (!detailQuery.data) {
+  // No snapshot yet (run hasn't persisted) and SSE hasn't surfaced
+  // anything — show a wait/empty state.
+  if (!detailQuery.data && live.shapes.length === 0) {
     return (
       <TopNavLayout showBack>
-        <div className="p-6 bg-white border border-gray-200 rounded text-sm text-gray-700">
-          No execution found for this claim.
+        <div className="p-6 bg-white border border-gray-200 rounded text-sm text-gray-700 flex items-center gap-2">
+          {batchId ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin text-[#FF612B]" />
+              Waiting for the engine to start evaluating this claim…
+            </>
+          ) : (
+            'No execution found for this claim.'
+          )}
         </div>
       </TopNavLayout>
     );
   }
 
-  const detail = detailQuery.data;
+  // Synthesize a minimal detail shell when the snapshot isn't ready yet
+  // but we DO have live shapes; this keeps every downstream `detail.*` ref
+  // valid without conditional rendering churn.
+  const detail =
+    detailQuery.data ??
+    ({
+      claimId: claimId ?? '',
+      runId: runId ?? '',
+      batchId: batchId ?? '',
+      workflowId: '',
+      claimStatus: 'INCONCLUSIVE',
+      processingTimeMin: 0,
+      startedAt: '',
+      finishedAt: '',
+      agents: [],
+      outerToolInvocations: [],
+      reviewStatus: null,
+      feedback: null,
+    } as NonNullable<typeof detailQuery.data>);
 
   return (
     <TopNavLayout showBack>
-      <div className="mb-4">
-        <h1 className="text-xl font-semibold text-gray-900">Claim Details</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Review the AI agent execution details for this claim.
-        </p>
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">Claim Details</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Review the AI agent execution details for this claim.
+          </p>
+        </div>
+        {live.active ? (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded border bg-amber-50 text-amber-700 border-amber-200">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            LIVE · streaming{' '}
+            {live.eventCount > 0 ? `${live.eventCount} events` : '…'}
+          </span>
+        ) : null}
+        {live.error && !live.active ? (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded border bg-red-50 text-red-700 border-red-200">
+            <X className="h-3 w-3" />
+            SSE error: {live.error}
+          </span>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap items-start gap-x-10 gap-y-3 mb-5">
@@ -175,7 +358,7 @@ export default function ClaimDetailsPage() {
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Batch ID :</div>
-          <div className="text-sm text-gray-800 font-mono text-xs">{detail.batchId}</div>
+          <div className="text-xs text-gray-800 font-mono">{detail.batchId}</div>
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Claim Status :</div>
@@ -221,13 +404,26 @@ export default function ClaimDetailsPage() {
             <div className="flex-1 p-4">
               {activeNav === 'agents' ? (
                 <div className="space-y-0 divide-y divide-[#e8ddd4] border border-[#e8ddd4]">
-                  {detail.agents.map((agent, index) => (
-                    <AgentCard
-                      key={agent.id}
-                      agent={agent}
-                      defaultExpanded={index === 0}
-                    />
-                  ))}
+                  {mergedAgents.length === 0 ? (
+                    <div className="p-6 text-sm text-gray-500 flex items-center gap-2">
+                      {live.active ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin text-[#FF612B]" />
+                          Waiting for the first rule evaluation…
+                        </>
+                      ) : (
+                        'No agent activity recorded.'
+                      )}
+                    </div>
+                  ) : (
+                    mergedAgents.map((agent, index) => (
+                      <AgentCard
+                        key={agent.id}
+                        agent={agent}
+                        defaultExpanded={index === mergedAgents.length - 1}
+                      />
+                    ))
+                  )}
                 </div>
               ) : (
                 <div className="space-y-6">
@@ -258,7 +454,7 @@ export default function ClaimDetailsPage() {
                       </div>
                     </div>
                   ) : null}
-                  {detail.agents.map((agent) => (
+                  {mergedAgents.map((agent) => (
                     <div key={agent.id}>
                       <div className="flex items-center gap-2 mb-2">
                         <span className="text-sm font-semibold text-gray-900">{agent.agentName}</span>
