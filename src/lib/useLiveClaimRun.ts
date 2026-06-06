@@ -252,8 +252,8 @@ export function liveShapeToAgent(shape: LiveShape): ClaimProcessingAgent {
     (e) => e.matched && (e.decisionType === 'DENY' || e.decisionType === 'STOP'),
   );
   let status: ClaimStatus = 'INCONCLUSIVE';
-  if (denyOrStop) status = 'NOT_MET';
-  else if (matched > 0) status = 'MET';
+  if (denyOrStop) status = 'DEFECT';
+  else if (matched > 0) status = 'CLEAN';
 
   const durationSec = Math.max(
     0,

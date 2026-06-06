@@ -1,6 +1,7 @@
 import { CheckCircle2, Clock, Flag, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { AiPlatformStatus, ReviewStatus } from '@/types';
+import { normalizeAuditStatus, type AuditStatus } from '@/lib/status';
+import type { ReviewStatus } from '@/types';
 
 type ChipStyle = {
   label: string;
@@ -8,26 +9,21 @@ type ChipStyle = {
   className: string;
 };
 
-const AI_STATUS: Record<AiPlatformStatus, ChipStyle> = {
-  NOT_MET: {
-    label: 'NOT MET',
-    icon: Flag,
-    className: 'bg-[#fce4e4] text-[#991b1b] border-[#e57373]',
-  },
-  MET: {
-    label: 'MET',
+const AI_STATUS: Record<AuditStatus, ChipStyle> = {
+  CLEAN: {
+    label: 'CLEAN',
     icon: CheckCircle2,
     className: 'bg-[#dcfce7] text-[#166534] border-[#4ade80]',
+  },
+  DEFECT: {
+    label: 'DEFECT',
+    icon: Flag,
+    className: 'bg-[#fce4e4] text-[#991b1b] border-[#e57373]',
   },
   INCONCLUSIVE: {
     label: 'INCONCLUSIVE',
     icon: Flag,
     className: 'bg-[#ede4f5] text-[#581c87] border-[#b794c9]',
-  },
-  DEFECT: {
-    label: 'DEFECT',
-    icon: Flag,
-    className: 'bg-[#ffedd5] text-[#c2410c] border-[#fb923c]',
   },
 };
 
@@ -65,8 +61,8 @@ function StatusChipBase({ style }: { style: ChipStyle }) {
   );
 }
 
-export function AiStatusChip({ status }: { status: AiPlatformStatus }) {
-  return <StatusChipBase style={AI_STATUS[status] ?? AI_STATUS.NOT_MET} />;
+export function AiStatusChip({ status }: { status: string }) {
+  return <StatusChipBase style={AI_STATUS[normalizeAuditStatus(status)]} />;
 }
 
 export function ReviewStatusChip({ status }: { status: ReviewStatus }) {

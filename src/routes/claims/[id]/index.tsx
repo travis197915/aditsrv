@@ -4,19 +4,168 @@ import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp, Clock, Check, X, Loader2 } from 'lucide-react';
 import TopNavLayout from '@/layouts/TopNavLayout';
 import { AiStatusChip } from '@/components/StatusChip';
-import { getClaimProcessing } from '@/lib/execute';
+import { getClaimProcessing, getClaimTrace } from '@/lib/execute';
 import { useLiveClaimRun, liveShapeToAgent } from '@/lib/useLiveClaimRun';
-import type { ClaimProcessingAgent } from '@/types/execute';
-import type { AiPlatformStatus } from '@/types';
+import type { ClaimProcessingAgent, ClaimTraceStep } from '@/types/execute';
 import { useAuth } from '@/contexts/AuthContext';
 import { getToken } from '@/utils/auth';
 
 const ORANGE = '#FF612B';
 
-function AgentCard({ agent, defaultExpanded }: { agent: ClaimProcessingAgent; defaultExpanded: boolean }) {
+/** Rule-level verdict chip: shows the SOP rule outcome in the auditor's native
+ *  vocabulary (Met / Not-Met / Inconclusive), distinct from the rolled-up
+ *  CLEAN/DEFECT/INCONCLUSIVE audit chip used on agents and the claim header. */
+function TraceStatusChip({ status }: { status: string }) {
+  const s = (status || '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+  const isMet = ['met', 'clean', 'pass', 'passed', 'allow'].includes(s);
+  const isNotMet = [
+    'not-met', 'notmet', 'defect', 'fail', 'failed', 'deny', 'stop', 'refer', 'pend',
+  ].includes(s);
+  const cls = isMet
+    ? 'bg-emerald-100 text-emerald-800'
+    : isNotMet
+      ? 'bg-red-100 text-red-700'
+      : 'bg-amber-100 text-amber-800';
+  const label = isMet ? 'Met' : isNotMet ? 'Not-Met' : 'Inconclusive';
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 text-xs font-semibold rounded ${cls}`}>
+      {label}
+    </span>
+  );
+}
+
+function TraceStepCard({ ts, index }: { ts: ClaimTraceStep; index: number }) {
+  return (
+    <div className="border border-[#e8ddd4] bg-[#fafafa] rounded p-3">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <span className="text-xs font-mono text-gray-500">
+          {ts.sop_rule_id || ts.sop_step_name || `Step ${ts.sop_step_number ?? index + 1}`}
+        </span>
+        <TraceStatusChip status={ts.status} />
+        {ts.sop_name ? (
+          <span className="text-xs text-gray-500">SOP: {ts.sop_name}</span>
+        ) : null}
+        {typeof ts.transaction_time_sec === 'number' ? (
+          <span className="inline-flex items-center gap-1 text-xs text-gray-400 ml-auto">
+            <Clock className="h-3 w-3" />
+            {ts.transaction_time_sec}s
+          </span>
+        ) : null}
+      </div>
+      {ts.sop_step_description ? (
+        <p className="text-xs text-gray-700 mb-2">{ts.sop_step_description}</p>
+      ) : null}
+      {ts.sop_action ? (
+        <div className="mb-2">
+          <span className="text-xs font-semibold text-gray-600">Action: </span>
+          <span className="text-xs text-gray-800">{ts.sop_action}</span>
+        </div>
+      ) : null}
+      {(ts.tools_used?.length ?? 0) > 0 || (ts.tools_skipped?.length ?? 0) > 0 ? (
+        <div className="mb-2">
+          <div className="text-xs font-semibold text-gray-700 mb-1">Tool calls</div>
+          <div className="flex flex-wrap gap-1">
+            {(ts.tools_used ?? []).map((name) => {
+              const ok = (ts.tools_succeeded ?? []).includes(name);
+              const failed = (ts.tools_failed ?? []).includes(name);
+              const cls = failed
+                ? 'bg-red-100 text-red-700 border-red-200'
+                : ok
+                  ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                  : 'bg-gray-100 text-gray-700 border-gray-200';
+              return (
+                <span key={name} className={`px-1.5 py-0.5 text-[10px] font-mono rounded border ${cls}`}>
+                  {name} {failed ? '✕' : ok ? '✓' : ''}
+                </span>
+              );
+            })}
+            {(ts.tools_skipped ?? []).map((name) => (
+              <span key={`skip-${name}`} className="px-1.5 py-0.5 text-[10px] font-mono rounded border bg-gray-50 text-gray-400 border-gray-200">
+                {name} (skipped)
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {ts.rationale ? (
+        <div className="mb-2 pt-2 border-t border-[#e8ddd4]">
+          <div className="text-xs font-semibold text-gray-700 mb-1">Rationale</div>
+          <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{ts.rationale}</p>
+        </div>
+      ) : null}
+      {ts.subrule_results && ts.subrule_results.length > 0 ? (
+        <div className="mb-2">
+          <div className="text-xs font-semibold text-gray-700 mb-1">Subrules</div>
+          <div className="border border-gray-200 rounded overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="px-2 py-1.5 text-left font-semibold text-gray-600">Subrule</th>
+                  <th className="px-2 py-1.5 text-left font-semibold text-gray-600">Status</th>
+                  <th className="px-2 py-1.5 text-left font-semibold text-gray-600">Condition / Fields</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ts.subrule_results.map((sr) => (
+                  <tr key={sr.subrule_id} className="border-b border-gray-100 last:border-0 align-top">
+                    <td className="px-2 py-1.5 font-mono text-gray-700">{sr.subrule_id}</td>
+                    <td className="px-2 py-1.5"><TraceStatusChip status={sr.status} /></td>
+                    <td className="px-2 py-1.5 text-gray-700">
+                      {sr.conditions.map((c, ci) => (
+                        <div key={ci} className="mb-1 last:mb-0">
+                          <div>{c.condition}</div>
+                          {c.using_fields && c.using_fields.length > 0 ? (
+                            <div className="text-[10px] font-mono text-gray-500 mt-0.5">
+                              {c.using_fields.join(', ')}
+                            </div>
+                          ) : null}
+                          {c.values && Object.keys(c.values).length > 0 ? (
+                            <div className="text-[10px] font-mono text-gray-500 mt-0.5 whitespace-pre-wrap">
+                              {JSON.stringify(c.values)}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+      {ts.evidence_refs && ts.evidence_refs.length > 0 ? (
+        <div>
+          <div className="text-xs font-semibold text-gray-700 mb-1">Evidence</div>
+          <div className="flex flex-wrap gap-1">
+            {ts.evidence_refs.map((ref, ri) => (
+              <span key={ri} className="px-1.5 py-0.5 text-[10px] font-mono bg-white border border-gray-200 rounded text-gray-700 break-all">
+                {ref}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AgentCard({
+  agent,
+  defaultExpanded,
+  traceSteps,
+}: {
+  agent: ClaimProcessingAgent;
+  defaultExpanded: boolean;
+  traceSteps: ClaimTraceStep[];
+}) {
   const [expanded, setExpanded] = useState(defaultExpanded);
-  const [activeTab, setActiveTab] = useState<'execution' | 'rules' | 'step'>('rules');
   const evaluations = agent.evaluations ?? [];
+  // Open to the tab that actually has content: live runs populate rule
+  // evaluations; persisted runs surface their detail under Explainability.
+  const [activeTab, setActiveTab] = useState<'execution' | 'rules' | 'step' | 'trace'>(
+    evaluations.length === 0 && traceSteps.length > 0 ? 'trace' : 'rules',
+  );
 
   return (
     <div className="border border-[#e8ddd4] bg-white">
@@ -27,7 +176,7 @@ function AgentCard({ agent, defaultExpanded }: { agent: ClaimProcessingAgent; de
       >
         <div className="flex items-center gap-3 flex-wrap min-w-0">
           <span className="text-sm font-semibold text-gray-900">{agent.agentName}</span>
-          <AiStatusChip status={agent.status as AiPlatformStatus} />
+          <AiStatusChip status={agent.status} />
           <span className="text-xs text-gray-500">Begin: {agent.beginTime}</span>
           <span className="text-xs text-gray-500">End: {agent.endTime}</span>
           <span className="inline-flex items-center gap-1 text-xs text-gray-500">
@@ -73,6 +222,16 @@ function AgentCard({ agent, defaultExpanded }: { agent: ClaimProcessingAgent; de
               style={activeTab === 'step' ? { backgroundColor: ORANGE } : undefined}
             >
               Step Execution
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('trace')}
+              className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
+                activeTab === 'trace' ? 'text-white' : 'text-[#FF612B] bg-transparent'
+              }`}
+              style={activeTab === 'trace' ? { backgroundColor: ORANGE } : undefined}
+            >
+              Explainability ({traceSteps.length})
             </button>
           </div>
 
@@ -170,7 +329,7 @@ function AgentCard({ agent, defaultExpanded }: { agent: ClaimProcessingAgent; de
               <div>
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-sm text-gray-700">Execution Status:</span>
-                  <AiStatusChip status={agent.status as AiPlatformStatus} />
+                  <AiStatusChip status={agent.status} />
                 </div>
                 <h4 className="text-sm font-semibold text-gray-900 mb-3">Process Summary</h4>
                 <ul className="space-y-2 list-disc pl-5">
@@ -181,7 +340,7 @@ function AgentCard({ agent, defaultExpanded }: { agent: ClaimProcessingAgent; de
                   ))}
                 </ul>
               </div>
-            ) : (
+            ) : activeTab === 'step' ? (
               <div className="space-y-2">
                 {agent.steps.map((step) => (
                   <div key={step.id} className="flex items-start gap-3 py-2 border-b border-gray-100 last:border-0">
@@ -193,6 +352,18 @@ function AgentCard({ agent, defaultExpanded }: { agent: ClaimProcessingAgent; de
                   </div>
                 ))}
               </div>
+            ) : (
+              traceSteps.length === 0 ? (
+                <div className="text-sm text-gray-500 py-4">
+                  No explainability trace recorded for this node.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {traceSteps.map((ts, i) => (
+                    <TraceStepCard key={`${ts.sop_rule_id || ts.sop_step_name || i}`} ts={ts} index={i} />
+                  ))}
+                </div>
+              )
             )}
           </div>
         </div>
@@ -204,6 +375,7 @@ function AgentCard({ agent, defaultExpanded }: { agent: ClaimProcessingAgent; de
 const LEFT_NAV_ITEMS = [
   { id: 'summary', label: 'Overall Claim Process Summarization' },
   { id: 'agents', label: 'Agents Execution Selection' },
+  { id: 'trace', label: 'Explainability Trace' },
 ];
 
 export default function ClaimDetailsPage() {
@@ -230,6 +402,36 @@ export default function ClaimDetailsPage() {
       return false;
     },
   });
+
+  // Explainability / trace log (additive). Persisted once the run finishes;
+  // poll briefly while the snapshot is still running so it catches up.
+  const traceQuery = useQuery({
+    queryKey: ['claim-trace', claimId, batchId, runId],
+    queryFn: () => getClaimTrace(token!, claimId!, { batchId, runId }),
+    enabled: !!token && !!claimId,
+    refetchInterval: (query) => {
+      const finished = detailQuery.data?.finishedAt;
+      if (!batchId) return false;
+      if (finished && (query.state.data?.length ?? 0) > 0) return false;
+      return 4000;
+    },
+  });
+
+  const traceByAgent = useMemo(() => {
+    const map = new Map<string, ClaimTraceStep[]>();
+    for (const step of traceQuery.data ?? []) {
+      for (const key of [step.shape_id, step.agent_name]) {
+        if (!key) continue;
+        const list = map.get(key) ?? [];
+        if (!list.includes(step)) list.push(step);
+        map.set(key, list);
+      }
+    }
+    return map;
+  }, [traceQuery.data]);
+
+  const traceFor = (agent: ClaimProcessingAgent): ClaimTraceStep[] =>
+    traceByAgent.get(agent.id) ?? traceByAgent.get(agent.agentName) ?? [];
 
   // "Live mode" engages when we have a batch context AND the snapshot
   // isn't finalized for this claim. Subscribe to the batch SSE, accumulate
@@ -362,7 +564,7 @@ export default function ClaimDetailsPage() {
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Claim Status :</div>
-          <AiStatusChip status={detail.claimStatus as AiPlatformStatus} />
+          <AiStatusChip status={detail.claimStatus} />
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Processing Time :</div>
@@ -421,10 +623,43 @@ export default function ClaimDetailsPage() {
                         key={agent.id}
                         agent={agent}
                         defaultExpanded={index === mergedAgents.length - 1}
+                        traceSteps={traceFor(agent)}
                       />
                     ))
                   )}
                 </div>
+              ) : activeNav === 'trace' ? (
+                (traceQuery.data?.length ?? 0) === 0 ? (
+                  <div className="p-6 text-sm text-gray-500 flex items-center gap-2">
+                    {traceQuery.isLoading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin text-[#FF612B]" />
+                        Loading explainability trace…
+                      </>
+                    ) : (
+                      'No explainability trace recorded for this claim yet.'
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {Array.from(
+                      (traceQuery.data ?? []).reduce((m, ts) => {
+                        const key = ts.agent_name || ts.shape_id || 'Agent';
+                        (m.get(key) ?? m.set(key, []).get(key)!).push(ts);
+                        return m;
+                      }, new Map<string, ClaimTraceStep[]>()),
+                    ).map(([agentName, steps]) => (
+                      <div key={agentName}>
+                        <div className="text-sm font-semibold text-gray-900 mb-2">{agentName}</div>
+                        <div className="space-y-4">
+                          {steps.map((ts, i) => (
+                            <TraceStepCard key={`${ts.sop_rule_id || ts.sop_step_name || i}`} ts={ts} index={i} />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
               ) : (
                 <div className="space-y-6">
                   {detail.outerToolInvocations.length > 0 ? (
@@ -458,7 +693,7 @@ export default function ClaimDetailsPage() {
                     <div key={agent.id}>
                       <div className="flex items-center gap-2 mb-2">
                         <span className="text-sm font-semibold text-gray-900">{agent.agentName}</span>
-                        <AiStatusChip status={agent.status as AiPlatformStatus} />
+                        <AiStatusChip status={agent.status} />
                       </div>
                       <ul className="space-y-2 list-disc pl-5">
                         {agent.processSummary.map((point, i) => (

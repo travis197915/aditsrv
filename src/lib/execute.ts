@@ -4,6 +4,7 @@ import type {
   BatchDetail,
   BatchEventType,
   ClaimProcessingSnapshot,
+  ClaimTraceStep,
   RunDetail,
   RunNodesPayload,
   Workflow,
@@ -133,6 +134,71 @@ export async function getClaimProcessing(
   });
   if (res.status === 404) return null;
   return checkResponse<ClaimProcessingSnapshot>(res, `claim processing failed (${res.status})`);
+}
+
+function claimTraceUrl(
+  claimId: string,
+  kind: 'trace' | 'explainability',
+  options?: { runId?: string; batchId?: string; download?: boolean },
+): string {
+  const params = new URLSearchParams();
+  if (options?.runId) params.set('run_id', options.runId);
+  if (options?.batchId) params.set('batch_id', options.batchId);
+  if (options?.download) params.set('download', '1');
+  const qs = params.toString();
+  return `${API_BASE}/api/claims/${encodeURIComponent(claimId)}/${kind}/${qs ? `?${qs}` : ''}`;
+}
+
+export async function getClaimTrace(
+  token: string,
+  claimId: string,
+  options?: { runId?: string; batchId?: string },
+): Promise<ClaimTraceStep[]> {
+  const res = await fetch(claimTraceUrl(claimId, 'trace', options), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 404) return [];
+  const payload = await checkResponse<unknown>(res, `claim trace failed (${res.status})`);
+  return Array.isArray(payload) ? (payload as ClaimTraceStep[]) : [];
+}
+
+export async function getClaimExplainability(
+  token: string,
+  claimId: string,
+  options?: { runId?: string; batchId?: string },
+): Promise<unknown[]> {
+  const res = await fetch(claimTraceUrl(claimId, 'explainability', options), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 404) return [];
+  const payload = await checkResponse<unknown>(res, `claim explainability failed (${res.status})`);
+  return Array.isArray(payload) ? (payload as unknown[]) : [];
+}
+
+/** Trigger a browser download of the trace/explainability JSON (auth header
+ *  required, so fetch the blob rather than navigating). */
+export async function downloadClaimTraceJson(
+  token: string,
+  claimId: string,
+  kind: 'trace' | 'explainability',
+  options?: { runId?: string; batchId?: string },
+): Promise<void> {
+  const res = await fetch(claimTraceUrl(claimId, kind, { ...options, download: true }), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const payload = await parseJson(res);
+    throw new ApiError(res.status, jsonMessage(payload, `download failed (${res.status})`), payload);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${kind}_${claimId}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export async function subscribeBatchEvents(

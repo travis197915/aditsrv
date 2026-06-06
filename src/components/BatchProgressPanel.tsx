@@ -282,7 +282,7 @@ export default function BatchProgressPanel({
     [events],
   );
 
-  const batchQuery = useQuery({
+  useQuery({
     queryKey: ['batch', batchId],
     queryFn: () => getBatch(token!, batchId!),
     enabled: !!token && !!batchId && (status === 'DONE' || status === 'ERROR'),

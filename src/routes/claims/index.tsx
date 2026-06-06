@@ -13,8 +13,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getBatch } from '@/lib/execute';
 import { getLastBatchId } from '@/lib/lastBatch';
 import { getToken } from '@/utils/auth';
+import { normalizeAuditStatus, decisionToAuditStatus } from '@/lib/status';
 import type { ClaimStatus, RunSummary } from '@/types/execute';
-import type { AiPlatformStatus, ReviewStatus } from '@/types';
+import type { ReviewStatus } from '@/types';
 
 type BatchTableRow = {
   claimId: string;
@@ -52,19 +53,30 @@ function StatCard({
   );
 }
 
-function isClaimStatus(value: string): value is ClaimStatus {
-  return value === 'MET' || value === 'NOT_MET' || value === 'INCONCLUSIVE' || value === 'DEFECT';
+/**
+ * Derive the claim-level status from a batch run summary. The backend now
+ * returns an explicit `claim_status` (CLEAN / DEFECT / INCONCLUSIVE) derived
+ * from the trace, so that always wins; we fall back to the run status +
+ * `final_decision_type` only for older rows that predate `claim_status`.
+ */
+function deriveClaimStatus(run: RunSummary): ClaimStatus {
+  if (run.claim_status) {
+    return normalizeAuditStatus(run.claim_status);
+  }
+  return decisionToAuditStatus({
+    finalDecisionType: (run as { final_decision_type?: string }).final_decision_type,
+    runStatus: String(run.run_status ?? run.status ?? ''),
+  });
 }
 
 function mapRunToRow(run: RunSummary, batchId: string, idx: number): BatchTableRow {
   const claimId = String(run.claim_id ?? run.claimId ?? `claim-${idx + 1}`);
   const runId = String(run.run_id ?? run.runId ?? run.id ?? '');
-  const statusRaw = String(run.claim_status ?? run.status ?? 'INCONCLUSIVE');
   return {
     claimId,
     runId,
     batchId,
-    claimStatus: isClaimStatus(statusRaw) ? statusRaw : 'INCONCLUSIVE',
+    claimStatus: deriveClaimStatus(run),
     runStatus: String(run.run_status ?? run.status ?? ''),
     processingTimeMin: Number(run.processing_time_min ?? run.transaction_time_min ?? 0),
     finishedAt: String(run.finished_at ?? ''),
@@ -244,10 +256,9 @@ export default function ClaimsListingPage() {
             className="px-3 py-1.5 text-sm border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#FF612B] focus:border-[#FF612B] text-gray-600"
           >
             <option value="">All</option>
-            <option value="MET">Met</option>
-            <option value="NOT_MET">Not Met</option>
-            <option value="INCONCLUSIVE">Inconclusive</option>
+            <option value="CLEAN">Clean</option>
             <option value="DEFECT">Defect</option>
+            <option value="INCONCLUSIVE">Inconclusive</option>
           </select>
 
           <DateFilterInput value={fromDate} onChange={setFromDate} />
@@ -327,7 +338,7 @@ export default function ClaimsListingPage() {
                     <td className="px-3 py-2 text-gray-800 font-medium whitespace-nowrap">{row.claimId}</td>
                     <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.runStatus}</td>
                     <td className="px-3 py-2 whitespace-nowrap">
-                      <AiStatusChip status={row.claimStatus as AiPlatformStatus} />
+                      <AiStatusChip status={row.claimStatus} />
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       <ReviewStatusChip status={reviewStatusDisplay()} />

@@ -14,7 +14,7 @@ export type BatchEventType =
 
 export type BatchStatus = 'IDLE' | 'RUNNING' | 'DONE' | 'ERROR';
 
-export type ClaimStatus = 'MET' | 'NOT_MET' | 'INCONCLUSIVE' | 'DEFECT';
+export type ClaimStatus = 'CLEAN' | 'DEFECT' | 'INCONCLUSIVE';
 
 export interface Workflow {
   id: string;
@@ -98,6 +98,46 @@ export interface RuleEvaluationDetail {
   codes: string[];
   llmProvider: string;
   llmMs: number;
+}
+
+export interface TraceCondition {
+  condition: string;
+  evaluated: boolean;
+  using_fields?: string[];
+  values?: Record<string, unknown>;
+}
+
+export interface TraceSubruleResult {
+  subrule_id: string;
+  status: string;
+  conditions: TraceCondition[];
+}
+
+export interface ClaimTraceStep {
+  timestamp?: string;
+  claim_id?: string;
+  execution_id?: string;
+  agent_name: string;
+  shape_id?: string;
+  sop_name?: string;
+  sop_step_number?: number | string | null;
+  sop_step_name?: string;
+  sop_rule_id?: string;
+  sop_step_description?: string;
+  sop_action?: string;
+  status: string;
+  rationale?: string;
+  evidence_refs?: string[];
+  started_at?: string;
+  ended_at?: string;
+  transaction_time_sec?: number;
+  tools_used?: string[];
+  tools_succeeded?: string[];
+  tools_failed?: string[];
+  tools_skipped?: string[];
+  decision_type?: string;
+  codes?: string[];
+  subrule_results?: TraceSubruleResult[];
 }
 
 export interface ClaimProcessingAgent {

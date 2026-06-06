@@ -32,8 +32,10 @@ export const getRoleLabel = (role: string): string => {
 
 // ── Claims Audit types ─────────────────────────────────────────────────────
 
-export type AiPlatformStatus = 'MET' | 'NOT_MET' | 'INCONCLUSIVE' | 'DEFECT';
-export type AuditorStatus = 'MET' | 'NOT_MET' | 'INCONCLUSIVE' | 'DEFECT';
+// Canonical 3-state audit model (see lib/status.ts). Legacy MET/NOT_MET values
+// from live streaming are normalized onto these at render time.
+export type AiPlatformStatus = 'CLEAN' | 'DEFECT' | 'INCONCLUSIVE';
+export type AuditorStatus = 'CLEAN' | 'DEFECT' | 'INCONCLUSIVE';
 export type ReviewStatus = 'APPROVED' | 'PENDING' | 'REJECTED';
 
 export interface ClaimRecord {
@@ -67,7 +69,7 @@ export interface ExecutionStep {
 export interface AgentExecution {
   id: string;
   agentName: string;
-  status: 'MET' | 'NOT_MET' | 'INCONCLUSIVE';
+  status: AiPlatformStatus;
   beginTime: string;
   endTime: string;
   durationSec: number;
@@ -78,7 +80,7 @@ export interface AgentExecution {
 export interface ClaimDetail {
   claimId: string;
   executionId: string;
-  claimStatus: 'MET' | 'NOT_MET' | 'INCONCLUSIVE';
+  claimStatus: AiPlatformStatus;
   processingTimeMin: number;
   agents: AgentExecution[];
   feedback?: string;
