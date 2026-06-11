@@ -93,17 +93,17 @@ export default function RunBatchModal({ open, onClose }: RunBatchModalProps) {
 
       <div className="absolute inset-0 flex items-start justify-center p-6 overflow-y-auto">
         <div className="bg-white w-full max-w-3xl rounded shadow-xl border border-gray-200 my-6">
-          <header className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
-            <h2 className="text-base font-semibold text-gray-900">
-              {inProgress ? 'Batch in progress' : 'Run workflow batch'}
+          <header className="flex items-center justify-between px-5 py-3 bg-[#FF612B] rounded-t">
+            <h2 className="text-base font-semibold text-white">
+              {inProgress ? 'Batch in progress' : 'Upload ERA Report'}
             </h2>
             <button
               type="button"
               onClick={handleClose}
-              className="p-1 rounded hover:bg-gray-100 transition-colors"
+              className="p-1 rounded hover:bg-white/20 transition-colors"
               aria-label="Close"
             >
-              <X className="h-4 w-4 text-gray-600" />
+              <X className="h-4 w-4 text-white" />
             </button>
           </header>
 
@@ -137,16 +137,16 @@ export default function RunBatchModal({ open, onClose }: RunBatchModalProps) {
 
               <div>
                 <label className="block text-sm font-medium text-gray-800 mb-1">
-                  Excel workbook (.xlsx) <span className="text-red-500">*</span>
+                  Select an Excel file (.xlsx / .xls) <span className="text-red-500">*</span>
                 </label>
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm border border-gray-300 rounded bg-white hover:bg-gray-50 transition-colors text-gray-700"
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm border border-[#FF612B] rounded bg-white hover:bg-orange-50 transition-colors text-[#FF612B] font-medium"
                   >
-                    <FileSpreadsheet className="h-4 w-4 text-gray-500" />
-                    {file ? 'Change file' : 'Choose file'}
+                    <FileSpreadsheet className="h-4 w-4" />
+                    {file ? 'Change file' : 'Choose File'}
                   </button>
                   <span className="text-sm text-gray-600 truncate">
                     {file ? file.name : 'No file selected'}

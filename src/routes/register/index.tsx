@@ -40,9 +40,8 @@ export default function Register() {
   return (
     <AuthLayout
       title="Create account"
-      subtitle="New accounts receive auditor access by default"
       footer={
-        <p className="mt-6 text-center text-sm text-muted-foreground">
+        <p className="mt-6 text-center text-sm text-gray-500">
           Already have an account?{' '}
           <Link
             to={loginPath}
@@ -53,6 +52,10 @@ export default function Register() {
         </p>
       }
     >
+      <div className="mb-6">
+        <h2 className="text-xl font-bold text-gray-900">Create account</h2>
+        <p className="mt-1 text-sm text-gray-500">New accounts receive auditor access by default</p>
+      </div>
       <FormPanel
         onSubmit={handleSubmit}
         loading={isLoading}

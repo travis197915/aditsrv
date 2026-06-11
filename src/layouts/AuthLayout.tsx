@@ -2,90 +2,76 @@ import type { ReactNode } from 'react';
 
 interface AuthLayoutProps {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   children: ReactNode;
   footer?: ReactNode;
 }
 
-export function AuthLayout({ title, subtitle, children, footer }: AuthLayoutProps) {
+function IllustrationPanel() {
   return (
-    <div className="min-h-dvh bg-[#fafafa] text-foreground flex flex-col lg:flex-row">
-      <div className="hidden lg:flex lg:w-[52%] xl:w-[55%] flex-col bg-[#FF612B] relative overflow-hidden">
-        <div className="absolute -top-32 -right-32 w-[420px] h-[420px] rounded-full bg-white/5" />
-        <div className="absolute top-1/3 -right-16 w-[260px] h-[260px] rounded-full bg-white/4" />
-        <div className="absolute -bottom-24 -left-24 w-[360px] h-[360px] rounded-full bg-white/5" />
+    <div className="hidden md:flex md:w-[48%] bg-[#FF612B] relative overflow-hidden items-center justify-center rounded-r-2xl">
+      <div className="absolute -top-20 -right-20 w-[300px] h-[300px] rounded-full bg-white/5" />
+      <div className="absolute -bottom-16 -left-16 w-[240px] h-[240px] rounded-full bg-white/5" />
 
-        <div className="relative z-10 flex flex-col h-full px-14 xl:px-20 py-14">
-          <div className="flex items-center gap-3 mb-auto">
-            <img
-              src="/logo.svg"
-              alt="Optum"
-              className="h-10 object-contain brightness-0 invert"
-            />
+      <div className="relative z-10 flex flex-col items-center">
+        {/* Circular graphic with document / check icons */}
+        <div className="w-[220px] h-[220px] rounded-full border-[6px] border-white/30 flex items-center justify-center relative">
+          <div className="absolute -left-8 bottom-6">
+            <DocumentIcon />
           </div>
-
-          <div className="mb-auto">
-            <h1 className="text-4xl xl:text-5xl font-bold text-white leading-[1.15] mb-5">
-              Claims Audit
-              <br />
-              Review
-              <br />
-              Dashboard
-            </h1>
-            <p className="text-[17px] text-white/70 leading-relaxed max-w-sm">
-              AI-powered audit review platform for behavioural health claims — streamline review, ensure accuracy.
-            </p>
+          <div className="relative">
+            <DocumentIcon />
           </div>
-
-          <div className="space-y-5 mb-14">
-            {[
-              { title: 'AI-Powered Analysis', desc: 'Intelligent agents audit claims against coverage criteria automatically' },
-              { title: 'Real-Time Review Status', desc: 'Track audit progress across all claims with live status updates' },
-              { title: 'Compliance & Accuracy', desc: 'Built-in approval workflows with full audit trail for compliance' },
-            ].map((item) => (
-              <div key={item.title} className="flex items-start gap-3.5">
-                <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
-                  <svg className="h-3.5 w-3.5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-white">{item.title}</h3>
-                  <p className="text-sm text-white/60">{item.desc}</p>
-                </div>
-              </div>
-            ))}
+          <div className="absolute -right-8 bottom-6">
+            <DocumentIcon />
           </div>
-
-          <p className="text-xs text-white/40 font-medium tracking-wide uppercase">
-            Optum · UHC Claims Audit Platform
-          </p>
         </div>
+        {/* Person silhouette */}
+        <svg className="w-20 h-20 text-[#d14a1a] -mt-4" viewBox="0 0 80 80" fill="currentColor">
+          <ellipse cx="40" cy="68" rx="18" ry="10" />
+          <circle cx="40" cy="36" r="12" />
+        </svg>
       </div>
+    </div>
+  );
+}
 
-      <div className="flex flex-1 items-center justify-center px-6 py-14 sm:px-10 lg:px-12 xl:px-20">
-        <div className="w-full max-w-[400px]">
-          <div className="flex lg:hidden flex-col items-center gap-3 mb-10">
-            <img src="/logo.svg" alt="Optum" className="h-8 object-contain" />
-            <p className="text-sm text-muted-foreground text-center max-w-xs">
-              Claims Audit Review Dashboard
-            </p>
-          </div>
+function DocumentIcon() {
+  return (
+    <div className="w-14 h-[68px] bg-white rounded-md shadow-lg flex flex-col items-center justify-center gap-1 relative">
+      <div className="w-8 h-1 bg-gray-300 rounded" />
+      <div className="w-8 h-1 bg-gray-300 rounded" />
+      <div className="w-6 h-1 bg-gray-300 rounded" />
+      <div className="absolute top-1 right-1">
+        <svg className="w-4 h-4 text-[#FF612B]" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+        </svg>
+      </div>
+    </div>
+  );
+}
 
-          <div className="mb-8">
-            <h2 className="text-2xl font-bold tracking-tight">{title}</h2>
-            <p className="mt-1.5 text-sm text-muted-foreground">{subtitle}</p>
-          </div>
+export function AuthLayout({ children, footer }: AuthLayoutProps) {
+  return (
+    <div className="min-h-dvh bg-[#f0ebe6] flex items-center justify-center px-4 py-10 relative overflow-hidden">
+      {/* Decorative background circles */}
+      <div className="absolute top-0 left-0 w-[300px] h-[300px] rounded-full bg-[#e8c9b8]/40 -translate-x-1/3 -translate-y-1/3" />
+      <div className="absolute bottom-0 right-0 w-[250px] h-[250px] rounded-full bg-[#e8c9b8]/40 translate-x-1/3 translate-y-1/3" />
 
-          <div className="rounded-xl border border-border bg-card p-6 sm:p-8 shadow-sm">
-            {children}
-            {footer}
-          </div>
-
-          <p className="mt-8 text-center text-xs text-muted-foreground">
-            HIPAA Compliant · SOC 2 Type II · ISO 27001
-          </p>
+      <div className="relative z-10 w-full max-w-[900px] bg-white rounded-2xl shadow-xl overflow-hidden flex min-h-[480px]">
+        {/* Left: form area */}
+        <div className="flex-1 flex flex-col justify-center px-10 py-12 md:px-14">
+          <img
+            src="/logo.svg"
+            alt="Optum"
+            className="h-10 object-contain mb-10 self-start"
+          />
+          {children}
+          {footer}
         </div>
+
+        {/* Right: orange illustration */}
+        <IllustrationPanel />
       </div>
     </div>
   );

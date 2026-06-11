@@ -846,7 +846,7 @@ export default function ClaimDetailsPage() {
 
   return (
     <TopNavLayout showBack>
-      <div className="flex flex-col h-[calc(100vh-6.5rem)] overflow-hidden">
+      <div className="flex flex-col">
       <div className="mb-4 shrink-0 flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Claim Details</h1>
@@ -880,7 +880,11 @@ export default function ClaimDetailsPage() {
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Batch ID :</div>
-          <div className="text-xs text-gray-800 font-mono">{header?.batchId || batchId || '—'}</div>
+          <div className="text-sm text-gray-800">{header?.batchId || batchId || '—'}</div>
+        </div>
+        <div>
+          <div className="text-sm text-gray-600 mb-1">Lob :</div>
+          <div className="text-sm text-gray-800">—</div>
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Claim Status :</div>
@@ -897,14 +901,10 @@ export default function ClaimDetailsPage() {
             {header ? `${header.processingTimeMin} min` : '—'}
           </div>
         </div>
-        <div>
-          <div className="text-sm text-gray-600 mb-1">Finished At :</div>
-          <div className="text-sm text-gray-800">{header?.finishedAt || '—'}</div>
-        </div>
       </div>
 
-      <div className="flex-1 min-h-0 border border-[#FF612B]/60 rounded-sm bg-white overflow-hidden flex flex-col">
-        <div className="flex h-full min-h-0">
+      <div className="h-[calc(100vh-6.5rem)] min-h-0 border border-[#FF612B]/60 rounded-sm bg-white overflow-hidden flex flex-col">
+        <div className="flex flex-1 min-h-0">
           <div className="w-[220px] shrink-0 flex flex-col border-r border-[#e8ddd4] bg-white self-stretch">
             {LEFT_NAV_ITEMS.map((item) => {
               const isActive = activeNav === item.id;
@@ -940,42 +940,41 @@ export default function ClaimDetailsPage() {
             <div className="flex-1 h-0 overflow-y-auto overscroll-y-contain p-4">
               {renderNavContent()}
             </div>
-
-            {canWrite && (
-              <div className="shrink-0 border-t border-[#e8ddd4] px-4 py-4 bg-[#fafafa]">
-                <label className="block text-sm font-medium text-gray-800 mb-2">
-                  Feedback: <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  value={feedback}
-                  onChange={(e) => setFeedback(e.target.value)}
-                  rows={3}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded bg-white resize-none focus:outline-none focus:ring-1 focus:ring-[#FF612B] focus:border-[#FF612B]"
-                />
-                <p className="text-xs text-gray-500 mt-2">Review submission not wired yet.</p>
-                <div className="flex justify-end gap-3 mt-3">
-                  <button
-                    type="button"
-                    disabled
-                    className="inline-flex items-center gap-2 px-6 py-2 text-sm font-medium text-white bg-[#4caf7a] hover:bg-[#43a06d] disabled:opacity-50 disabled:cursor-not-allowed rounded-full transition-colors"
-                  >
-                    <Check className="h-4 w-4" />
-                    Approve
-                  </button>
-                  <button
-                    type="button"
-                    disabled
-                    className="inline-flex items-center gap-2 px-6 py-2 text-sm font-medium text-white bg-[#e57373] hover:bg-[#ef5350] disabled:opacity-50 disabled:cursor-not-allowed rounded-full transition-colors"
-                  >
-                    <X className="h-4 w-4" />
-                    Reject
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
+
+      {canWrite && (
+        <div className="mt-5 shrink-0 border border-[#e8ddd4] rounded-sm px-4 py-4 bg-[#fafafa]">
+          <label className="block text-sm font-medium text-gray-800 mb-2">
+            Feedback: <span className="text-red-500">*</span>
+          </label>
+          <textarea
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+            rows={3}
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded bg-white resize-none focus:outline-none focus:ring-1 focus:ring-[#FF612B] focus:border-[#FF612B]"
+          />
+          <div className="flex justify-end gap-3 mt-3">
+            <button
+              type="button"
+              disabled
+              className="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white bg-[#2e9e5e] hover:bg-[#27854f] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
+            >
+              <Check className="h-4 w-4" />
+              Approve
+            </button>
+            <button
+              type="button"
+              disabled
+              className="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white bg-[#d32f2f] hover:bg-[#b71c1c] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
+            >
+              <X className="h-4 w-4" />
+              Reject
+            </button>
+          </div>
+        </div>
+      )}
       </div>
     </TopNavLayout>
   );

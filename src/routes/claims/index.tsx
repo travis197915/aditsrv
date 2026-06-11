@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
-  Search, ChevronLeft, ChevronRight, Upload,
-  ClipboardList, TrendingUp, Clock,
+  Search, ChevronLeft, ChevronRight, Upload, XCircle,
+  Newspaper, TrendingUp, Clock, FileText, Eye,
 } from 'lucide-react';
 import TopNavLayout from '@/layouts/TopNavLayout';
 import { AiStatusChip, ReviewStatusChip } from '@/components/StatusChip';
@@ -27,7 +27,17 @@ type BatchTableRow = {
   startedAt: string;
   finishedAt: string;
   finishedAtDate: string;
+  auditorStatus: string;
+  auditedErrorCategory: string;
+  auditedErrorDescription: string;
 };
+
+function firstString(...values: unknown[]): string {
+  for (const v of values) {
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return '';
+}
 
 function mmDdYyyyToIso(value: string): string {
   const match = /^(\d{2})-(\d{2})-(\d{4})$/.exec(value.trim());
@@ -54,26 +64,74 @@ function StatCard({
   suffix?: string;
 }) {
   return (
-    <div className="bg-white border border-gray-200 rounded p-4 flex items-center gap-4">
-      <div className="p-3 bg-orange-50 rounded border border-orange-200 shrink-0">
-        <Icon className="h-6 w-6 text-[#FF612B]" />
-      </div>
-      <div>
-        <div className="text-2xl font-bold text-[#FF612B]">
+    <div className="bg-[#fce8db] border border-[#e8a07a] rounded-xl px-6 py-5 flex items-center gap-4">
+      <Icon className="h-10 w-10 text-[#FF612B] shrink-0" strokeWidth={1.5} />
+      <div className="ml-auto text-right">
+        <div className="text-2xl font-bold text-[#4a4a4a]">
           {value}{suffix}
         </div>
-        <div className="text-sm text-gray-500 mt-0.5">{label}</div>
+        <div className="text-sm font-semibold text-[#FF612B] mt-0.5">{label}</div>
       </div>
     </div>
   );
 }
 
 /**
- * Derive the claim-level status from a batch run summary. The backend now
- * returns an explicit `claim_status` (CLEAN / DEFECT / INCONCLUSIVE) derived
- * from the trace, so that always wins; we fall back to the run status +
- * `final_decision_type` only for older rows that predate `claim_status`.
+ * AUDITOR STATUS cell. When the run carries audited-error data (category /
+ * description from the ERA report), the cell becomes a clickable chip that
+ * toggles a tooltip popover, matching section 6.6 of the training guide.
+ * Falls back to a plain `—` when no auditor data is present.
  */
+function AuditorStatusCell({ row }: { row: BatchTableRow }) {
+  const [open, setOpen] = useState(false);
+  const hasDetails = !!(row.auditedErrorCategory || row.auditedErrorDescription);
+  const label = row.auditorStatus || (hasDetails ? 'AUDITED' : '');
+
+  if (!label && !hasDetails) {
+    return <span className="text-gray-500">—</span>;
+  }
+
+  return (
+    <div className="relative inline-block">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (hasDetails) setOpen((o) => !o);
+        }}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap ${
+          hasDetails
+            ? 'bg-[#ede4f5] text-[#581c87] border-[#b794c9] cursor-pointer hover:brightness-95'
+            : 'bg-gray-100 text-gray-600 border-gray-200'
+        }`}
+      >
+        {label || 'AUDITED'}
+      </button>
+
+      {open && hasDetails && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
+          <div
+            className="absolute left-0 top-full mt-1.5 z-20 w-72 rounded-md border border-gray-200 bg-white shadow-lg p-3 text-left normal-case"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-2">
+              <div className="text-xs text-gray-500">Audited Error Category</div>
+              <div className="text-xs font-semibold text-gray-900">
+                {row.auditedErrorCategory || '—'}
+              </div>
+              <div className="text-xs text-gray-500">Audited Error Description</div>
+              <div className="text-xs text-gray-700 leading-relaxed">
+                {row.auditedErrorDescription || '—'}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function deriveClaimStatus(run: RunSummary): ClaimStatus {
   if (run.claim_status) {
     return normalizeAuditStatus(run.claim_status);
@@ -103,27 +161,79 @@ function mapRunToRow(run: RunSummary, idx: number): BatchTableRow {
       ? `${run.finished_at_date} ${run.finished_at}`
       : String(run.finished_at_date ?? run.finished_at ?? ''),
     finishedAtDate: String(run.finished_at_date ?? ''),
+    auditorStatus: firstString(run.auditor_status, run.audited_status),
+    auditedErrorCategory: firstString(
+      run.audited_error_category,
+      run.auditor_error_category,
+      run.error_category,
+    ),
+    auditedErrorDescription: firstString(
+      run.audited_error_description,
+      run.auditor_error_description,
+      run.error_description,
+    ),
   };
 }
 
-const ROWS_PER_PAGE_OPTIONS = [10, 25, 50, 100];
+const ROWS_PER_PAGE_OPTIONS = [25, 50, 75, 100];
+
+const TABLE_COLUMNS = [
+  'CLAIM ID',
+  'TOTAL BILLED AMOUNT',
+  'TOTAL PAID AMOUNT',
+  'LOB',
+  'PAID DATE',
+  'PLATFORM DATE',
+  'CLAIM AUDITED DATE',
+  'AUDITOR STATUS',
+  'AI PLATFORM STATUS',
+  'REVIEW STATUS',
+  'TRANSACTION TIME(MINS)',
+  'ACCURACY',
+  'ACTION',
+] as const;
+
+const COL_COUNT = TABLE_COLUMNS.length;
+
+// Pending state: what the user has typed/selected but not yet applied
+type FilterState = {
+  claimId: string;
+  reviewStatus: string;
+  status: string;
+  fromDate: string;
+  toDate: string;
+};
+
+const EMPTY_FILTER: FilterState = {
+  claimId: '',
+  reviewStatus: '',
+  status: '',
+  fromDate: '',
+  toDate: '',
+};
+
+function hasAnyValue(f: FilterState) {
+  return !!(f.claimId || f.reviewStatus || f.status || f.fromDate || f.toDate);
+}
 
 export default function ClaimsListingPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { canWrite } = useAuth();
   const token = getToken();
-  const [searchClaimId, setSearchClaimId] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [reviewStatusFilter, setReviewStatusFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
+
+  // Pending = what's currently in the inputs (not yet committed)
+  const [pending, setPending] = useState<FilterState>(EMPTY_FILTER);
+  // Applied = what the query actually uses (committed on Apply)
+  const [applied, setApplied] = useState<FilterState>(EMPTY_FILTER);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [runBatchOpen, setRunBatchOpen] = useState(false);
   const [runBatchOpenId, setRunBatchOpenId] = useState(0);
+
+  // Buttons enabled only when the pending inputs have at least one value
+  const filtersActive = hasAnyValue(pending);
 
   const openRunBatchModal = () => {
     setRunBatchOpenId((n) => n + 1);
@@ -135,13 +245,19 @@ export default function ClaimsListingPage() {
     void queryClient.invalidateQueries({ queryKey: ['runs'] });
   };
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedSearch(searchClaimId), 300);
-    return () => window.clearTimeout(timer);
-  }, [searchClaimId]);
+  const handleApply = useCallback(() => {
+    setApplied(pending);
+    setCurrentPage(1);
+  }, [pending]);
 
-  const fromIso = mmDdYyyyToIso(fromDate);
-  const toIso = mmDdYyyyToIso(toDate);
+  const handleClear = useCallback(() => {
+    setPending(EMPTY_FILTER);
+    setApplied(EMPTY_FILTER);
+    setCurrentPage(1);
+  }, []);
+
+  const fromIso = mmDdYyyyToIso(applied.fromDate);
+  const toIso = mmDdYyyyToIso(applied.toDate);
   const offset = (currentPage - 1) * rowsPerPage;
 
   const runsQuery = useQuery({
@@ -150,8 +266,8 @@ export default function ClaimsListingPage() {
       'processed',
       currentPage,
       rowsPerPage,
-      debouncedSearch,
-      statusFilter,
+      applied.claimId,
+      applied.status,
       fromIso,
       toIso,
     ],
@@ -159,8 +275,8 @@ export default function ClaimsListingPage() {
       listProcessedRuns(token!, {
         limit: rowsPerPage,
         offset,
-        claimId: debouncedSearch || undefined,
-        claimStatus: statusFilter || undefined,
+        claimId: applied.claimId || undefined,
+        claimStatus: applied.status || undefined,
         fromDate: fromIso || undefined,
         toDate: toIso || undefined,
       }),
@@ -172,27 +288,19 @@ export default function ClaimsListingPage() {
     const rows = (runsQuery.data?.results ?? []).map((run, idx) =>
       mapRunToRow(run, offset + idx),
     );
-    if (!reviewStatusFilter) return rows;
-    return rows.filter((row) => row.reviewStatus === reviewStatusFilter);
-  }, [runsQuery.data?.results, offset, reviewStatusFilter]);
+    if (!applied.reviewStatus) return rows;
+    return rows.filter((row) => row.reviewStatus === applied.reviewStatus);
+  }, [runsQuery.data?.results, offset, applied.reviewStatus]);
 
+  // Reset to page 1 when rows-per-page changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearch, statusFilter, reviewStatusFilter, fromDate, toDate, rowsPerPage]);
+  }, [rowsPerPage]);
 
   const total = runsQuery.data?.count ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / rowsPerPage));
   const startIdx = total === 0 ? 0 : offset + 1;
   const endIdx = Math.min(offset + pageRows.length, total);
-
-  const handleClear = () => {
-    setSearchClaimId('');
-    setReviewStatusFilter('');
-    setStatusFilter('');
-    setFromDate('');
-    setToDate('');
-    setCurrentPage(1);
-  };
 
   const pageNumbers = (() => {
     const pages: (number | '...')[] = [];
@@ -227,10 +335,11 @@ export default function ClaimsListingPage() {
         <p className="text-sm text-gray-500 mt-0.5">Review and Audit behavioural health claims.</p>
       </div>
 
+      {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <StatCard icon={ClipboardList} label="Total Claims Processed" value={total} />
-        <StatCard icon={TrendingUp} label="Accuracy" value="—" />
-        <StatCard icon={Clock} label="Avg Processing Time" value={avgProcessingTime} suffix=" min" />
+        <StatCard icon={Newspaper} label="Total Claims Audited" value={total} />
+        <StatCard icon={TrendingUp} label="Accuracy" value="—" suffix="%" />
+        <StatCard icon={Clock} label="Average Processing Time" value={avgProcessingTime ? `${avgProcessingTime} min` : '—'} />
       </div>
 
       {!runsQuery.isLoading && total === 0 && !runsQuery.error && (
@@ -245,22 +354,27 @@ export default function ClaimsListingPage() {
         </div>
       )}
 
-      <div className="bg-white border border-gray-200 rounded">
-        <div className="p-4 border-b border-gray-200 flex flex-wrap items-end gap-2">
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-3 mb-4">
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">Claim ID</label>
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
             <input
               type="text"
               placeholder="Search Claim ID"
-              value={searchClaimId}
-              onChange={(e) => setSearchClaimId(e.target.value)}
+              value={pending.claimId}
+              onChange={(e) => setPending((p) => ({ ...p, claimId: e.target.value }))}
               className="pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#FF612B] focus:border-[#FF612B] w-40"
             />
           </div>
+        </div>
 
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">Review Status</label>
           <select
-            value={reviewStatusFilter}
-            onChange={(e) => setReviewStatusFilter(e.target.value)}
+            value={pending.reviewStatus}
+            onChange={(e) => setPending((p) => ({ ...p, reviewStatus: e.target.value }))}
             className="px-3 py-1.5 text-sm border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#FF612B] focus:border-[#FF612B] text-gray-600"
           >
             <option value="">Select Review Status</option>
@@ -268,55 +382,79 @@ export default function ClaimsListingPage() {
             <option value="PENDING">Pending</option>
             <option value="REJECTED">Rejected</option>
           </select>
+        </div>
 
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">Status</label>
           <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            value={pending.status}
+            onChange={(e) => setPending((p) => ({ ...p, status: e.target.value }))}
             className="px-3 py-1.5 text-sm border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#FF612B] focus:border-[#FF612B] text-gray-600"
           >
-            <option value="">Select Claim Status</option>
+            <option value="">All</option>
             <option value="CLEAN">Clean</option>
             <option value="DEFECT">Defect</option>
             <option value="INCONCLUSIVE">Inconclusive</option>
           </select>
-
-          <DateFilterInput value={fromDate} onChange={setFromDate} placeholder="From date" />
-          <DateFilterInput value={toDate} onChange={setToDate} placeholder="To date" />
-
-          <button
-            onClick={handleClear}
-            className="px-4 py-1.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded transition-colors"
-          >
-            Clear
-          </button>
-          {canWrite && (
-            <button
-              type="button"
-              onClick={openRunBatchModal}
-              className="flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded transition-colors"
-            >
-              <Upload className="h-3.5 w-3.5" />
-              Upload
-            </button>
-          )}
         </div>
 
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">From Platform Date</label>
+          <DateFilterInput
+            value={pending.fromDate}
+            onChange={(v) => setPending((p) => ({ ...p, fromDate: v }))}
+            placeholder="mm-dd-yyyy"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">To Platform Date</label>
+          <DateFilterInput
+            value={pending.toDate}
+            onChange={(v) => setPending((p) => ({ ...p, toDate: v }))}
+            placeholder="mm-dd-yyyy"
+          />
+        </div>
+
+        <button
+          onClick={handleApply}
+          disabled={!filtersActive}
+          className="px-5 py-1.5 text-sm font-medium text-white bg-[#FF612B] hover:bg-[#e5551f] rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Apply
+        </button>
+
+        <button
+          onClick={handleClear}
+          disabled={!filtersActive}
+          className="flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium text-[#FF612B] border border-[#FF612B] hover:bg-orange-50 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <XCircle className="h-3.5 w-3.5" />
+          Clear
+        </button>
+
+        {canWrite && (
+          <button
+            type="button"
+            onClick={openRunBatchModal}
+            className="flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium text-white bg-[#FF612B] hover:bg-[#e5551f] rounded transition-colors"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            Upload
+          </button>
+        )}
+      </div>
+
+      {/* Table */}
+      <div className="bg-white border border-gray-200 rounded overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-gray-100 border-b border-gray-200">
-                {[
-                  'CLAIM ID',
-                  'RUN STATUS',
-                  'CLAIM STATUS',
-                  'REVIEW STATUS',
-                  'PROCESSING TIME (MIN)',
-                  'STARTED AT',
-                  'FINISHED AT',
-                ].map((col) => (
+              <tr className="bg-[#fff3eb] border-b border-[#ffd6c4]">
+                {TABLE_COLUMNS.map((col) => (
                   <th
                     key={col}
-                    className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap"
+                    className="px-3 py-2.5 text-left text-[11px] font-semibold text-gray-700 uppercase tracking-wide whitespace-nowrap"
                   >
                     {col}
                   </th>
@@ -326,75 +464,107 @@ export default function ClaimsListingPage() {
             <tbody>
               {runsQuery.isLoading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-400">
+                  <td colSpan={COL_COUNT} className="px-4 py-10 text-center text-sm text-gray-400">
                     Loading processed claims...
                   </td>
                 </tr>
               ) : pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-400">
-                    {debouncedSearch || statusFilter || reviewStatusFilter || fromDate || toDate
+                  <td colSpan={COL_COUNT} className="px-4 py-10 text-center text-sm text-gray-400">
+                    {hasAnyValue(applied)
                       ? 'No claims found matching your filters.'
                       : 'No processed claims yet. Run a batch to populate the audit review table.'}
                   </td>
                 </tr>
               ) : (
-                pageRows.map((row) => (
-                  <tr
-                    key={`${row.claimId}-${row.runId}`}
-                    onClick={() => handleRowClick(row)}
-                    className="border-b border-gray-100 hover:bg-orange-50/40 cursor-pointer transition-colors"
-                  >
-                    <td className="px-3 py-2 text-gray-800 font-medium whitespace-nowrap">{row.claimId}</td>
-                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.runStatus}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <AiStatusChip status={row.claimStatus} />
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <ReviewStatusChip status={row.reviewStatus} />
-                    </td>
-                    <td className="px-3 py-2 text-gray-600 tabular-nums">{row.processingTimeMin}</td>
-                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.startedAt || '—'}</td>
-                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.finishedAt || '—'}</td>
-                  </tr>
-                ))
+                pageRows.map((row) => {
+                  const isPending = row.reviewStatus === 'PENDING';
+                  return (
+                    <tr
+                      key={`${row.claimId}-${row.runId}`}
+                      className="border-b border-gray-100 hover:bg-orange-50/40 transition-colors"
+                    >
+                      <td className="px-3 py-2 text-gray-800 font-medium whitespace-nowrap">{row.claimId}</td>
+                      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">—</td>
+                      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">—</td>
+                      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">—</td>
+                      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">—</td>
+                      <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.finishedAtDate || '—'}</td>
+                      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">—</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <AuditorStatusCell row={row} />
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <AiStatusChip status={row.claimStatus} />
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <ReviewStatusChip status={row.reviewStatus} />
+                      </td>
+                      <td className="px-3 py-2 text-gray-600 tabular-nums">{row.processingTimeMin}</td>
+                      <td className="px-3 py-2 text-gray-500">%</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => handleRowClick(row)}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded ${
+                            isPending
+                              ? 'bg-[#FF612B] text-white hover:bg-[#e5551f]'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          } transition-colors`}
+                        >
+                          {isPending ? (
+                            <>
+                              <FileText className="h-3 w-3" />
+                              Pending
+                            </>
+                          ) : (
+                            <>
+                              <Eye className="h-3 w-3" />
+                            </>
+                          )}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
 
+        {/* Pagination */}
         <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 flex-wrap gap-2">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5">
             <button
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
               disabled={currentPage === 1 || runsQuery.isLoading}
-              className="p-1 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="h-8 w-8 flex items-center justify-center rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <ChevronLeft className="h-4 w-4 text-gray-600" />
             </button>
 
             {pageNumbers.map((p, i) =>
               p === '...' ? (
-                <span key={`ellipsis-${i}`} className="px-1.5 text-gray-400 text-sm">…</span>
+                <span key={`ellipsis-${i}`} className="px-2 text-gray-400 text-sm">…</span>
               ) : (
                 <button
                   key={p}
                   onClick={() => setCurrentPage(p as number)}
-                  className={`min-w-[28px] h-7 px-1.5 text-sm rounded transition-colors ${
+                  className={`h-8 min-w-[32px] px-2 text-sm border transition-colors ${
                     currentPage === p
-                      ? 'bg-[#FF612B] text-white font-semibold'
-                      : 'hover:bg-gray-100 text-gray-600'
+                      ? 'bg-[#FF612B] text-white font-semibold border-[#FF612B]'
+                      : 'border-gray-300 hover:bg-gray-50 text-gray-600'
                   }`}
                 >
                   {p}
                 </button>
-              )
+              ),
             )}
 
             <button
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
               disabled={currentPage >= totalPages || runsQuery.isLoading || total === 0}
-              className="p-1 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="h-8 w-8 flex items-center justify-center rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <ChevronRight className="h-4 w-4 text-gray-600" />
             </button>
@@ -402,7 +572,7 @@ export default function ClaimsListingPage() {
 
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-500">
-              Showing {startIdx}–{endIdx} of {total} entries
+              Showing <strong>{startIdx}–{endIdx}</strong> of {total} entries
             </span>
             <div className="flex items-center gap-2">
               <select
