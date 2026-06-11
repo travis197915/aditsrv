@@ -1,14 +1,19 @@
-import { useMemo, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useParams, useSearchParams } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp, Clock, Check, X, Loader2 } from 'lucide-react';
 import TopNavLayout from '@/layouts/TopNavLayout';
 import { AiStatusChip } from '@/components/StatusChip';
-import { getClaimProcessing, getClaimTrace } from '@/lib/execute';
+import { getClaimAgents, getClaimSummary, getClaimTrace } from '@/lib/execute';
 import { processFor } from '@/lib/process';
 import { aggregateTraceAudit } from '@/lib/status';
 import { useLiveClaimRun, liveShapeToAgent } from '@/lib/useLiveClaimRun';
-import type { ClaimProcessingAgent, ClaimTraceStep } from '@/types/execute';
+import type {
+  ClaimProcessingAgent,
+  ClaimStatus,
+  ClaimSummaryAgent,
+  ClaimTraceStep,
+} from '@/types/execute';
 import { useAuth } from '@/contexts/AuthContext';
 import { getToken } from '@/utils/auth';
 
@@ -410,46 +415,168 @@ const LEFT_NAV_ITEMS = [
   { id: 'summary', label: 'Overall Claim Process Summarization' },
   { id: 'agents', label: 'Agents Execution Selection' },
   { id: 'trace', label: 'Explainability Trace' },
-];
+] as const;
+
+type ClaimNavId = (typeof LEFT_NAV_ITEMS)[number]['id'];
+
+type ClaimListPreview = {
+  claimId: string;
+  runId: string;
+  batchId: string;
+  claimStatus: ClaimStatus;
+  runStatus: string;
+  processingTimeMin: number;
+  startedAt: string;
+  finishedAt: string;
+};
+
+function SummarySkeleton() {
+  return (
+    <div className="space-y-6 animate-pulse">
+      {[1, 2, 3].map((n) => (
+        <div key={n} className="space-y-2">
+          <div className="h-4 w-48 bg-gray-200 rounded" />
+          <div className="h-3 w-full bg-gray-100 rounded" />
+          <div className="h-3 w-5/6 bg-gray-100 rounded" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AgentsSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      {[1, 2].map((n) => (
+        <div key={n} className="border border-[#e8ddd4] rounded overflow-hidden">
+          <div className="h-12 bg-[#f5efe9]" />
+          <div className="p-4 space-y-3">
+            <div className="h-4 w-40 bg-gray-200 rounded" />
+            <div className="h-3 w-full bg-gray-100 rounded" />
+            <div className="h-3 w-4/5 bg-gray-100 rounded" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TraceSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      {[1, 2].map((n) => (
+        <div key={n} className="border border-[#e8ddd4] rounded overflow-hidden">
+          <div className="h-10 bg-[#f5efe9]" />
+          <div className="p-4 space-y-3">
+            {[1, 2, 3].map((m) => (
+              <div key={m} className="h-16 bg-gray-100 rounded" />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const TERMINAL_RUN_STATUSES = new Set([
+  'COMPLETED',
+  'FAILED',
+  'FETCH_FAILED',
+  'TERMINATED_EARLY',
+]);
+
+/** Stop polling / background refetch once the engine has a terminal outcome. */
+function isTerminalRun(
+  data?: { finishedAt?: string | null; runStatus?: string } | null,
+): boolean {
+  if (!data) return false;
+  if (data.finishedAt) return true;
+  return TERMINAL_RUN_STATUSES.has(String(data.runStatus ?? '').toUpperCase());
+}
 
 export default function ClaimDetailsPage() {
+  const queryClient = useQueryClient();
   const { id: claimId } = useParams<{ id: string }>();
+  const location = useLocation();
+  const listPreview = (location.state as { listPreview?: ClaimListPreview } | null)
+    ?.listPreview;
   const [searchParams] = useSearchParams();
   const { canWrite } = useAuth();
   const token = getToken();
   const batchId = searchParams.get('batchId') ?? undefined;
   const runId = searchParams.get('runId') ?? undefined;
 
-  const detailQuery = useQuery({
-    queryKey: ['claim-processing', claimId, batchId, runId],
-    queryFn: () =>
-      getClaimProcessing(token!, claimId!, { batchId, runId }),
-    enabled: !!token && !!claimId,
-    // While the snapshot reports a still-running claim (or no snapshot yet
-    // exists), poll briefly as a backstop so the persisted view catches up
-    // even if a terminal SSE event is missed.
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (!batchId) return false;
-      if (!data) return 4000;
-      if (!data.finishedAt) return 4000;
-      return false;
-    },
-  });
+  const [activeNav, setActiveNav] = useState<ClaimNavId>('summary');
+  const [feedback, setFeedback] = useState('');
 
-  // Explainability / trace log (additive). Persisted once the run finishes;
-  // poll briefly while the snapshot is still running so it catches up.
-  const traceQuery = useQuery({
-    queryKey: ['claim-trace', claimId, batchId, runId],
-    queryFn: () => getClaimTrace(token!, claimId!, { batchId, runId }),
-    enabled: !!token && !!claimId,
+  const claimOpts = { batchId, runId };
+
+  const summaryQuery = useQuery({
+    queryKey: ['claim-summary', claimId, batchId, runId],
+    queryFn: () => getClaimSummary(token!, claimId!, claimOpts),
+    enabled: !!token && !!claimId && activeNav === 'summary',
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
     refetchInterval: (query) => {
-      const finished = detailQuery.data?.finishedAt;
-      if (!batchId) return false;
-      if (finished && (query.state.data?.length ?? 0) > 0) return false;
+      if (activeNav !== 'summary' || !batchId) return false;
+      if (isTerminalRun(query.state.data) || isTerminalRun(listPreview)) return false;
       return 4000;
     },
   });
+
+  const agentsQuery = useQuery({
+    queryKey: ['claim-agents', claimId, batchId, runId],
+    queryFn: () => getClaimAgents(token!, claimId!, claimOpts),
+    enabled: !!token && !!claimId && activeNav === 'agents',
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: (query) => {
+      if (activeNav !== 'agents' || !batchId) return false;
+      if (isTerminalRun(query.state.data) || isTerminalRun(listPreview)) return false;
+      return 4000;
+    },
+  });
+
+  const traceQuery = useQuery({
+    queryKey: ['claim-trace', claimId, batchId, runId],
+    queryFn: () => getClaimTrace(token!, claimId!, claimOpts),
+    enabled:
+      !!token
+      && !!claimId
+      && (activeNav === 'trace' || activeNav === 'agents'),
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: (query) => {
+      if (!batchId || (activeNav !== 'trace' && activeNav !== 'agents')) return false;
+      const headerDone =
+        isTerminalRun(summaryQuery.data)
+        || isTerminalRun(agentsQuery.data)
+        || isTerminalRun(listPreview);
+      if (headerDone && (query.state.data?.length ?? 0) > 0) return false;
+      return 4000;
+    },
+  });
+
+  // Warm agents + trace in the background once summary confirms a finished run.
+  useEffect(() => {
+    if (!token || !claimId) return;
+    const done =
+      isTerminalRun(summaryQuery.data)
+      || isTerminalRun(listPreview);
+    if (!done) return;
+
+    const opts = { batchId, runId };
+    void queryClient.prefetchQuery({
+      queryKey: ['claim-agents', claimId, batchId, runId],
+      queryFn: () => getClaimAgents(token, claimId, opts),
+      staleTime: 5 * 60 * 1000,
+    });
+    void queryClient.prefetchQuery({
+      queryKey: ['claim-trace', claimId, batchId, runId],
+      queryFn: () => getClaimTrace(token, claimId, opts),
+      staleTime: 5 * 60 * 1000,
+    });
+  }, [token, claimId, batchId, runId, summaryQuery.data, listPreview, queryClient]);
 
   const traceByAgent = useMemo(() => {
     const map = new Map<string, ClaimTraceStep[]>();
@@ -467,14 +594,13 @@ export default function ClaimDetailsPage() {
   const traceFor = (agent: ClaimProcessingAgent): ClaimTraceStep[] =>
     traceByAgent.get(agent.id) ?? traceByAgent.get(agent.agentName) ?? [];
 
-  // "Live mode" engages when we have a batch context AND the snapshot
-  // isn't finalized for this claim. Subscribe to the batch SSE, accumulate
-  // this claim's events, and merge them into the rendered agents list.
   const liveEnabled =
+    activeNav === 'agents' &&
     !!token &&
     !!claimId &&
     !!batchId &&
-    (!detailQuery.data || !detailQuery.data.finishedAt);
+    !isTerminalRun(agentsQuery.data)
+    && !isTerminalRun(listPreview);
 
   const live = useLiveClaimRun({
     token,
@@ -483,85 +609,245 @@ export default function ClaimDetailsPage() {
     enabled: liveEnabled,
   });
 
-  const [activeNav, setActiveNav] = useState('agents');
-  const [feedback, setFeedback] = useState('');
-
   // Merge: snapshot agents are authoritative; shapes the live stream has
   // seen but the snapshot doesn't yet include get appended.
   const mergedAgents: ClaimProcessingAgent[] = useMemo(() => {
-    const fromSnapshot = detailQuery.data?.agents ?? [];
+    const fromSnapshot = agentsQuery.data?.agents ?? [];
     const snapshotIds = new Set(fromSnapshot.map((a) => a.id));
     const liveOnly = live.shapes
       .filter((s) => !snapshotIds.has(s.shapeId))
       .map(liveShapeToAgent);
     return [...fromSnapshot, ...liveOnly];
-  }, [detailQuery.data, live.shapes]);
+  }, [agentsQuery.data, live.shapes]);
 
-  // Initial spinner: only while the snapshot is loading AND no live event
-  // has arrived. Once SSE starts streaming we have something to render.
-  if (detailQuery.isLoading && live.shapes.length === 0) {
-    return (
-      <TopNavLayout showBack>
-        <div className="p-6 bg-white border border-gray-200 rounded text-sm text-gray-500 flex items-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin text-[#FF612B]" />
-          Loading claim details…
+  const header =
+    summaryQuery.data
+    ?? agentsQuery.data
+    ?? (listPreview
+      ? {
+          claimId: listPreview.claimId,
+          runId: listPreview.runId,
+          batchId: listPreview.batchId,
+          claimStatus: listPreview.claimStatus,
+          runStatus: listPreview.runStatus,
+          processingTimeMin: listPreview.processingTimeMin,
+          finishedAt: listPreview.finishedAt,
+          startedAt: listPreview.startedAt,
+        }
+      : undefined);
+  const headerClaimStatus = header?.claimStatus ?? 'INCONCLUSIVE';
+
+  const renderNavContent = () => {
+    if (activeNav === 'agents') {
+      if (agentsQuery.isLoading && !agentsQuery.data && live.shapes.length === 0) {
+        return <AgentsSkeleton />;
+      }
+
+      if (agentsQuery.error && live.shapes.length === 0) {
+        return (
+          <div className="p-6 m-4 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+            {(agentsQuery.error as Error).message}
+          </div>
+        );
+      }
+
+      if (!agentsQuery.data && live.shapes.length === 0) {
+        return (
+          <div className="p-8 text-sm text-gray-500 flex items-center justify-center gap-2">
+            {batchId ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin text-[#FF612B]" />
+                Waiting for the engine to start evaluating this claim…
+              </>
+            ) : (
+              'No execution found for this claim.'
+            )}
+          </div>
+        );
+      }
+
+      if (mergedAgents.length === 0) {
+        return (
+          <div className="border border-[#e8ddd4] m-4 p-6 text-sm text-gray-500 flex items-center gap-2">
+            {live.active ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin text-[#FF612B]" />
+                Waiting for the first rule evaluation…
+              </>
+            ) : (
+              'No agent activity recorded.'
+            )}
+          </div>
+        );
+      }
+
+      const lastId = mergedAgents[mergedAgents.length - 1]?.id;
+      const groups = mergedAgents.reduce((m, agent) => {
+        const proc = processFor(traceFor(agent)[0]?.sop_name);
+        const entry = m.get(proc.label) ?? { order: proc.order, agents: [] };
+        entry.agents.push(agent);
+        m.set(proc.label, entry);
+        return m;
+      }, new Map<string, { order: number; agents: ClaimProcessingAgent[] }>());
+
+      return (
+        <div className="space-y-6">
+          {Array.from(groups)
+            .sort((a, b) => a[1].order - b[1].order)
+            .map(([label, { agents }]) => (
+              <ProcessSection
+                key={label}
+                label={label}
+                rollup={aggregateTraceAudit(agents.map((a) => a.status))}
+                count={agents.length}
+                defaultExpanded={agents.some((a) => a.id === lastId)}
+              >
+                <div className="divide-y divide-[#e8ddd4]">
+                  {agents.map((agent) => (
+                    <AgentCard
+                      key={agent.id}
+                      agent={agent}
+                      defaultExpanded={agent.id === lastId}
+                      traceSteps={traceFor(agent)}
+                    />
+                  ))}
+                </div>
+              </ProcessSection>
+            ))}
         </div>
-      </TopNavLayout>
-    );
-  }
+      );
+    }
 
-  if (detailQuery.error && live.shapes.length === 0) {
-    return (
-      <TopNavLayout showBack>
-        <div className="p-6 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-          {(detailQuery.error as Error).message}
+    if (activeNav === 'trace') {
+      if (traceQuery.isLoading && !traceQuery.data) {
+        return <TraceSkeleton />;
+      }
+
+      if (traceQuery.error) {
+        return (
+          <div className="p-6 m-4 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+            {(traceQuery.error as Error).message}
+          </div>
+        );
+      }
+
+      if ((traceQuery.data?.length ?? 0) === 0) {
+        return (
+          <div className="p-8 text-sm text-gray-500 text-center">
+            No explainability trace recorded for this claim yet.
+          </div>
+        );
+      }
+
+      return (
+        <div className="space-y-6">
+          {Array.from(
+            (traceQuery.data ?? []).reduce((m, ts) => {
+              const proc = processFor(ts.sop_name);
+              const entry = m.get(proc.label) ?? { order: proc.order, steps: [] };
+              entry.steps.push(ts);
+              m.set(proc.label, entry);
+              return m;
+            }, new Map<string, { order: number; steps: ClaimTraceStep[] }>()),
+          )
+            .sort((a, b) => a[1].order - b[1].order)
+            .map(([label, { steps }]) => (
+              <ProcessSection
+                key={label}
+                label={label}
+                rollup={aggregateTraceAudit(steps.map((s) => s.status))}
+                count={steps.length}
+                defaultExpanded
+              >
+                <div className="space-y-4 p-4">
+                  {steps.map((ts, i) => (
+                    <TraceStepCard key={`${ts.sop_rule_id || ts.sop_step_name || i}`} ts={ts} index={i} />
+                  ))}
+                </div>
+              </ProcessSection>
+            ))}
         </div>
-      </TopNavLayout>
-    );
-  }
+      );
+    }
 
-  // No snapshot yet (run hasn't persisted) and SSE hasn't surfaced
-  // anything — show a wait/empty state.
-  if (!detailQuery.data && live.shapes.length === 0) {
-    return (
-      <TopNavLayout showBack>
-        <div className="p-6 bg-white border border-gray-200 rounded text-sm text-gray-700 flex items-center gap-2">
-          {batchId ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin text-[#FF612B]" />
-              Waiting for the engine to start evaluating this claim…
-            </>
-          ) : (
-            'No execution found for this claim.'
-          )}
+    if (summaryQuery.isLoading && !summaryQuery.data) {
+      return <SummarySkeleton />;
+    }
+
+    if (summaryQuery.error) {
+      return (
+        <div className="p-6 m-4 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+          {(summaryQuery.error as Error).message}
         </div>
-      </TopNavLayout>
-    );
-  }
+      );
+    }
 
-  // Synthesize a minimal detail shell when the snapshot isn't ready yet
-  // but we DO have live shapes; this keeps every downstream `detail.*` ref
-  // valid without conditional rendering churn.
-  const detail =
-    detailQuery.data ??
-    ({
-      claimId: claimId ?? '',
-      runId: runId ?? '',
-      batchId: batchId ?? '',
-      workflowId: '',
-      claimStatus: 'INCONCLUSIVE',
-      processingTimeMin: 0,
-      startedAt: '',
-      finishedAt: '',
-      agents: [],
-      outerToolInvocations: [],
-      reviewStatus: null,
-      feedback: null,
-    } as NonNullable<typeof detailQuery.data>);
+    if (!summaryQuery.data) {
+      return (
+        <div className="p-8 text-sm text-gray-500 text-center">
+          No summary available for this claim.
+        </div>
+      );
+    }
+
+    const summaryAgents: ClaimSummaryAgent[] = summaryQuery.data.agents;
+
+    return (
+      <div className="space-y-6">
+        {summaryQuery.data.outerToolInvocations.length > 0 ? (
+          <div>
+            <h4 className="text-sm font-semibold text-gray-900 mb-2">Outer Tool Invocations</h4>
+            <div className="border border-gray-200 rounded overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Phase</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Tool</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Status</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Duration (ms)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summaryQuery.data.outerToolInvocations.map((inv, i) => (
+                    <tr key={i} className="border-b border-gray-100 last:border-0">
+                      <td className="px-3 py-1.5 text-gray-800">{inv.phase}</td>
+                      <td className="px-3 py-1.5 text-gray-600">{inv.tool}</td>
+                      <td className="px-3 py-1.5 text-gray-600">{inv.status}</td>
+                      <td className="px-3 py-1.5 text-gray-600 tabular-nums">{inv.durationMs}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+        {summaryAgents.length === 0 ? (
+          <div className="text-sm text-gray-500 py-4">No process summary available yet.</div>
+        ) : (
+          summaryAgents.map((agent) => (
+            <div key={agent.id}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm font-semibold text-gray-900">{agent.agentName}</span>
+                <AiStatusChip status={agent.status} />
+              </div>
+              <ul className="space-y-2 list-disc pl-5">
+                {agent.processSummary.map((point, i) => (
+                  <li key={i} className="text-sm text-gray-700 leading-relaxed">
+                    {point}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        )}
+      </div>
+    );
+  };
 
   return (
     <TopNavLayout showBack>
-      <div className="mb-4 flex items-start justify-between gap-4">
+      <div className="flex flex-col h-[calc(100vh-6.5rem)] overflow-hidden">
+      <div className="mb-4 shrink-0 flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Claim Details</h1>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -583,41 +869,52 @@ export default function ClaimDetailsPage() {
         ) : null}
       </div>
 
-      <div className="flex flex-wrap items-start gap-x-10 gap-y-3 mb-5">
+      <div className="shrink-0 flex flex-wrap items-start gap-x-10 gap-y-3 mb-5">
         <div>
           <div className="text-sm text-gray-600 mb-1">Claim ID :</div>
-          <div className="text-sm font-semibold text-gray-900">{detail.claimId}</div>
+          <div className="text-sm font-semibold text-gray-900">{claimId ?? '—'}</div>
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Execution ID :</div>
-          <div className="text-sm text-gray-800">{detail.runId}</div>
+          <div className="text-sm text-gray-800">{header?.runId || runId || '—'}</div>
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Batch ID :</div>
-          <div className="text-xs text-gray-800 font-mono">{detail.batchId}</div>
+          <div className="text-xs text-gray-800 font-mono">{header?.batchId || batchId || '—'}</div>
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Claim Status :</div>
-          <AiStatusChip status={detail.claimStatus} />
+          {header ? (
+            <AiStatusChip status={headerClaimStatus} />
+          ) : (
+            <span className="text-sm text-gray-400">—</span>
+          )}
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Processing Time :</div>
           <div className="inline-flex items-center gap-1.5 text-sm text-gray-800">
             <Clock className="h-4 w-4 text-gray-400" />
-            {detail.processingTimeMin} min
+            {header ? `${header.processingTimeMin} min` : '—'}
           </div>
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Finished At :</div>
-          <div className="text-sm text-gray-800">{detail.finishedAt}</div>
+          <div className="text-sm text-gray-800">{header?.finishedAt || '—'}</div>
         </div>
       </div>
 
-      <div className="border border-[#FF612B]/60 rounded-sm bg-white overflow-hidden">
-        <div className="flex min-h-[420px]">
-          <div className="w-[220px] shrink-0 flex flex-col border-r border-[#e8ddd4]">
+      <div className="flex-1 min-h-0 border border-[#FF612B]/60 rounded-sm bg-white overflow-hidden flex flex-col">
+        <div className="flex h-full min-h-0">
+          <div className="w-[220px] shrink-0 flex flex-col border-r border-[#e8ddd4] bg-white self-stretch">
             {LEFT_NAV_ITEMS.map((item) => {
               const isActive = activeNav === item.id;
+              const isLoading =
+                activeNav === item.id &&
+                (item.id === 'trace'
+                  ? traceQuery.isLoading
+                  : item.id === 'agents'
+                    ? agentsQuery.isLoading
+                    : summaryQuery.isLoading);
               return (
                 <button
                   key={item.id}
@@ -630,153 +927,22 @@ export default function ClaimDetailsPage() {
                   }`}
                   style={isActive ? { backgroundColor: ORANGE } : undefined}
                 >
-                  {item.label}
+                  <span className="flex items-center gap-2">
+                    {item.label}
+                    {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" /> : null}
+                  </span>
                 </button>
               );
             })}
           </div>
 
-          <div className="flex-1 min-w-0 flex flex-col">
-            <div className="flex-1 p-4">
-              {activeNav === 'agents' ? (
-                mergedAgents.length === 0 ? (
-                  <div className="border border-[#e8ddd4] p-6 text-sm text-gray-500 flex items-center gap-2">
-                    {live.active ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin text-[#FF612B]" />
-                        Waiting for the first rule evaluation…
-                      </>
-                    ) : (
-                      'No agent activity recorded.'
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-6">
-                    {(() => {
-                      const lastId = mergedAgents[mergedAgents.length - 1]?.id;
-                      const groups = mergedAgents.reduce((m, agent) => {
-                        const proc = processFor(traceFor(agent)[0]?.sop_name);
-                        const entry = m.get(proc.label) ?? { order: proc.order, agents: [] };
-                        entry.agents.push(agent);
-                        m.set(proc.label, entry);
-                        return m;
-                      }, new Map<string, { order: number; agents: ClaimProcessingAgent[] }>());
-                      return Array.from(groups)
-                        .sort((a, b) => a[1].order - b[1].order)
-                        .map(([label, { agents }]) => (
-                          <ProcessSection
-                            key={label}
-                            label={label}
-                            rollup={aggregateTraceAudit(agents.map((a) => a.status))}
-                            count={agents.length}
-                            defaultExpanded={agents.some((a) => a.id === lastId)}
-                          >
-                            <div className="divide-y divide-[#e8ddd4]">
-                              {agents.map((agent) => (
-                                <AgentCard
-                                  key={agent.id}
-                                  agent={agent}
-                                  defaultExpanded={agent.id === lastId}
-                                  traceSteps={traceFor(agent)}
-                                />
-                              ))}
-                            </div>
-                          </ProcessSection>
-                        ));
-                    })()}
-                  </div>
-                )
-              ) : activeNav === 'trace' ? (
-                (traceQuery.data?.length ?? 0) === 0 ? (
-                  <div className="p-6 text-sm text-gray-500 flex items-center gap-2">
-                    {traceQuery.isLoading ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin text-[#FF612B]" />
-                        Loading explainability trace…
-                      </>
-                    ) : (
-                      'No explainability trace recorded for this claim yet.'
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-6">
-                    {Array.from(
-                      (traceQuery.data ?? []).reduce((m, ts) => {
-                        const proc = processFor(ts.sop_name);
-                        const entry = m.get(proc.label) ?? { order: proc.order, steps: [] };
-                        entry.steps.push(ts);
-                        m.set(proc.label, entry);
-                        return m;
-                      }, new Map<string, { order: number; steps: ClaimTraceStep[] }>()),
-                    )
-                      .sort((a, b) => a[1].order - b[1].order)
-                      .map(([label, { steps }]) => (
-                        <ProcessSection
-                          key={label}
-                          label={label}
-                          rollup={aggregateTraceAudit(steps.map((s) => s.status))}
-                          count={steps.length}
-                          defaultExpanded
-                        >
-                          <div className="space-y-4 p-4">
-                            {steps.map((ts, i) => (
-                              <TraceStepCard key={`${ts.sop_rule_id || ts.sop_step_name || i}`} ts={ts} index={i} />
-                            ))}
-                          </div>
-                        </ProcessSection>
-                      ))}
-                  </div>
-                )
-              ) : (
-                <div className="space-y-6">
-                  {detail.outerToolInvocations.length > 0 ? (
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-900 mb-2">Outer Tool Invocations</h4>
-                      <div className="border border-gray-200 rounded overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="bg-gray-50 border-b border-gray-200">
-                              <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Phase</th>
-                              <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Tool</th>
-                              <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Status</th>
-                              <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Duration (ms)</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {detail.outerToolInvocations.map((inv, i) => (
-                              <tr key={i} className="border-b border-gray-100 last:border-0">
-                                <td className="px-3 py-1.5 text-gray-800">{inv.phase}</td>
-                                <td className="px-3 py-1.5 text-gray-600">{inv.tool}</td>
-                                <td className="px-3 py-1.5 text-gray-600">{inv.status}</td>
-                                <td className="px-3 py-1.5 text-gray-600 tabular-nums">{inv.durationMs}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ) : null}
-                  {mergedAgents.map((agent) => (
-                    <div key={agent.id}>
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-sm font-semibold text-gray-900">{agent.agentName}</span>
-                        <AiStatusChip status={agent.status} />
-                      </div>
-                      <ul className="space-y-2 list-disc pl-5">
-                        {agent.processSummary.map((point, i) => (
-                          <li key={i} className="text-sm text-gray-700 leading-relaxed">
-                            {point}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-              )}
+          <div className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
+            <div className="flex-1 h-0 overflow-y-auto overscroll-y-contain p-4">
+              {renderNavContent()}
             </div>
 
             {canWrite && (
-              <div className="border-t border-[#e8ddd4] px-4 py-4 bg-[#fafafa]">
+              <div className="shrink-0 border-t border-[#e8ddd4] px-4 py-4 bg-[#fafafa]">
                 <label className="block text-sm font-medium text-gray-800 mb-2">
                   Feedback: <span className="text-red-500">*</span>
                 </label>
@@ -809,6 +975,7 @@ export default function ClaimDetailsPage() {
             )}
           </div>
         </div>
+      </div>
       </div>
     </TopNavLayout>
   );

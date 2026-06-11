@@ -205,7 +205,9 @@ export function useLiveClaimRun({
           queryClient.invalidateQueries({
             predicate: (q) =>
               Array.isArray(q.queryKey) &&
-              q.queryKey[0] === 'claim-processing' &&
+              ['claim-summary', 'claim-agents', 'claim-trace'].includes(
+                String(q.queryKey[0]),
+              ) &&
               q.queryKey[1] === claimId,
           });
         }

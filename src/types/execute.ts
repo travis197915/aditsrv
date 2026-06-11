@@ -22,10 +22,28 @@ export interface Workflow {
   [key: string]: unknown;
 }
 
+export interface ProcessedRunsPage {
+  count: number;
+  limit: number;
+  offset: number;
+  avg_processing_time_min?: number;
+  results: RunSummary[];
+}
+
+export interface ProcessedRunsQuery {
+  limit?: number;
+  offset?: number;
+  claimId?: string;
+  claimStatus?: string;
+  fromDate?: string;
+  toDate?: string;
+}
+
 export interface RunSummary {
   id?: string;
   run_id?: string;
   runId?: string;
+  batch_id?: string;
   claim_id?: string;
   claimId?: string;
   status?: string;
@@ -33,7 +51,11 @@ export interface RunSummary {
   run_status?: string;
   processing_time_min?: number;
   transaction_time_min?: number;
+  started_at?: string;
+  started_at_date?: string;
   finished_at?: string;
+  finished_at_date?: string;
+  review_status?: string;
   [key: string]: unknown;
 }
 
@@ -159,7 +181,7 @@ export interface OuterToolInvocation {
   durationMs: number;
 }
 
-export interface ClaimProcessingSnapshot {
+export interface ClaimRunHeader {
   claimId: string;
   runId: string;
   batchId: string;
@@ -168,6 +190,28 @@ export interface ClaimProcessingSnapshot {
   processingTimeMin: number;
   startedAt: string;
   finishedAt: string;
+}
+
+export interface ClaimSummaryAgent {
+  id: string;
+  agentName: string;
+  status: ClaimStatus;
+  processSummary: string[];
+}
+
+export interface ClaimSummarySnapshot extends ClaimRunHeader {
+  agents: ClaimSummaryAgent[];
+  outerToolInvocations: OuterToolInvocation[];
+  reviewStatus: null;
+  feedback: null;
+}
+
+export interface ClaimAgentsSnapshot extends ClaimRunHeader {
+  agents: ClaimProcessingAgent[];
+}
+
+/** @deprecated Use ClaimSummarySnapshot / ClaimAgentsSnapshot per tab. */
+export interface ClaimProcessingSnapshot extends ClaimRunHeader {
   agents: ClaimProcessingAgent[];
   outerToolInvocations: OuterToolInvocation[];
   reviewStatus: null;

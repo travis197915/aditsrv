@@ -1,15 +1,19 @@
 import { useState } from 'react';
-import { Link, Navigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { FormPanel, FormInput } from '@/components/FormPanel';
 import { AuthLayout } from '../../layouts/AuthLayout';
+import { DEFAULT_POST_LOGIN_PATH, readRedirectFromSearch } from '@/utils/redirect';
 
 export default function Login() {
   const { user, login, isLoading } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const redirectTo = readRedirectFromSearch(location.search);
   const [error, setError] = useState<string | undefined>();
 
   if (user) {
-    return <Navigate to="/claims" replace />;
+    return <Navigate to={redirectTo} replace />;
   }
 
   const handleSubmit = async (data: Record<string, unknown>) => {
@@ -21,10 +25,16 @@ export default function Login() {
         throw new Error('Email and password are required');
       }
       await login(email, password);
+      navigate(redirectTo, { replace: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Login failed. Please try again.');
     }
   };
+
+  const registerPath =
+    redirectTo === DEFAULT_POST_LOGIN_PATH
+      ? '/register'
+      : `/register?redirect=${encodeURIComponent(redirectTo)}`;
 
   return (
     <AuthLayout
@@ -33,7 +43,10 @@ export default function Login() {
       footer={
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Don&apos;t have an account?{' '}
-          <Link to="/register" className="font-medium text-[#FF612B] hover:text-[#e5551f] transition-colors">
+          <Link
+            to={registerPath}
+            className="font-medium text-[#FF612B] hover:text-[#e5551f] transition-colors"
+          >
             Sign up
           </Link>
         </p>

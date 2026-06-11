@@ -78,7 +78,7 @@ export default function RunBatchModal({ open, onClose }: RunBatchModalProps) {
 
   const handleClose = () => {
     if (execution.status === 'DONE') {
-      queryClient.invalidateQueries({ queryKey: ['batch'] });
+      queryClient.invalidateQueries({ queryKey: ['runs'] });
     }
     onClose();
   };

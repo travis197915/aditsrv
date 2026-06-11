@@ -93,12 +93,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         const payload = await authApi.post<AuthResponse>('/auth/login', { email, password });
         persistSession(payload);
-        navigate('/claims', { replace: true });
       } finally {
         setIsLoading(false);
       }
     },
-    [navigate, persistSession],
+    [persistSession],
   );
 
   const register = useCallback(
@@ -111,12 +110,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
           name,
         });
         persistSession(payload);
-        navigate('/claims', { replace: true });
       } finally {
         setIsLoading(false);
       }
     },
-    [navigate, persistSession],
+    [persistSession],
   );
 
   const logout = useCallback(() => {

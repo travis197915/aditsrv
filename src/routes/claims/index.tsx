@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
   Search, ChevronLeft, ChevronRight, Upload,
@@ -10,8 +10,7 @@ import { AiStatusChip, ReviewStatusChip } from '@/components/StatusChip';
 import DateFilterInput from '@/components/DateFilterInput';
 import RunBatchModal from '@/components/RunBatchModal';
 import { useAuth } from '@/contexts/AuthContext';
-import { getBatch } from '@/lib/execute';
-import { getLastBatchId } from '@/lib/lastBatch';
+import { listProcessedRuns } from '@/lib/execute';
 import { getToken } from '@/utils/auth';
 import { normalizeAuditStatus, decisionToAuditStatus } from '@/lib/status';
 import type { ClaimStatus, RunSummary } from '@/types/execute';
@@ -22,10 +21,26 @@ type BatchTableRow = {
   runId: string;
   batchId: string;
   claimStatus: ClaimStatus;
+  reviewStatus: ReviewStatus;
   runStatus: string;
   processingTimeMin: number;
+  startedAt: string;
   finishedAt: string;
+  finishedAtDate: string;
 };
+
+function mmDdYyyyToIso(value: string): string {
+  const match = /^(\d{2})-(\d{2})-(\d{4})$/.exec(value.trim());
+  if (!match) return '';
+  const [, month, day, year] = match;
+  return `${year}-${month}-${day}`;
+}
+
+function deriveReviewStatus(run: RunSummary): ReviewStatus {
+  const raw = String(run.review_status ?? 'PENDING').toUpperCase();
+  if (raw === 'APPROVED' || raw === 'REJECTED') return raw;
+  return 'PENDING';
+}
 
 function StatCard({
   icon: Icon,
@@ -69,44 +84,41 @@ function deriveClaimStatus(run: RunSummary): ClaimStatus {
   });
 }
 
-function mapRunToRow(run: RunSummary, batchId: string, idx: number): BatchTableRow {
+function mapRunToRow(run: RunSummary, idx: number): BatchTableRow {
   const claimId = String(run.claim_id ?? run.claimId ?? `claim-${idx + 1}`);
   const runId = String(run.run_id ?? run.runId ?? run.id ?? '');
+  const batchId = String(run.batch_id ?? '');
   return {
     claimId,
     runId,
     batchId,
     claimStatus: deriveClaimStatus(run),
+    reviewStatus: deriveReviewStatus(run),
     runStatus: String(run.run_status ?? run.status ?? ''),
     processingTimeMin: Number(run.processing_time_min ?? run.transaction_time_min ?? 0),
-    finishedAt: String(run.finished_at ?? ''),
+    startedAt: run.started_at_date && run.started_at
+      ? `${run.started_at_date} ${run.started_at}`
+      : String(run.started_at_date ?? run.started_at ?? ''),
+    finishedAt: run.finished_at_date && run.finished_at
+      ? `${run.finished_at_date} ${run.finished_at}`
+      : String(run.finished_at_date ?? run.finished_at ?? ''),
+    finishedAtDate: String(run.finished_at_date ?? ''),
   };
-}
-
-function reviewStatusDisplay(): ReviewStatus {
-  return 'PENDING';
 }
 
 const ROWS_PER_PAGE_OPTIONS = [10, 25, 50, 100];
 
 export default function ClaimsListingPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { canWrite } = useAuth();
   const token = getToken();
-
-  const [lastBatchId, setLastBatchId] = useState<string | null>(() => getLastBatchId());
   const [searchClaimId, setSearchClaimId] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [reviewStatusFilter, setReviewStatusFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
-  const [appliedFilters, setAppliedFilters] = useState({
-    searchClaimId: '',
-    reviewStatus: '',
-    status: '' as ClaimStatus | '',
-    fromDate: '',
-    toDate: '',
-  });
 
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
@@ -120,50 +132,58 @@ export default function ClaimsListingPage() {
 
   const handleModalClose = () => {
     setRunBatchOpen(false);
-    setLastBatchId(getLastBatchId());
+    void queryClient.invalidateQueries({ queryKey: ['runs'] });
   };
 
-  const batchQuery = useQuery({
-    queryKey: ['batch', lastBatchId],
-    queryFn: () => getBatch(token!, lastBatchId!),
-    enabled: !!token && !!lastBatchId,
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchClaimId), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchClaimId]);
+
+  const fromIso = mmDdYyyyToIso(fromDate);
+  const toIso = mmDdYyyyToIso(toDate);
+  const offset = (currentPage - 1) * rowsPerPage;
+
+  const runsQuery = useQuery({
+    queryKey: [
+      'runs',
+      'processed',
+      currentPage,
+      rowsPerPage,
+      debouncedSearch,
+      statusFilter,
+      fromIso,
+      toIso,
+    ],
+    queryFn: () =>
+      listProcessedRuns(token!, {
+        limit: rowsPerPage,
+        offset,
+        claimId: debouncedSearch || undefined,
+        claimStatus: statusFilter || undefined,
+        fromDate: fromIso || undefined,
+        toDate: toIso || undefined,
+      }),
+    enabled: !!token,
+    placeholderData: (prev) => prev,
   });
 
-  const allRows = useMemo(() => {
-    if (!lastBatchId) return [];
-    return (batchQuery.data?.runs ?? []).map((run, idx) => mapRunToRow(run, lastBatchId, idx));
-  }, [batchQuery.data?.runs, lastBatchId]);
+  const pageRows = useMemo(() => {
+    const rows = (runsQuery.data?.results ?? []).map((run, idx) =>
+      mapRunToRow(run, offset + idx),
+    );
+    if (!reviewStatusFilter) return rows;
+    return rows.filter((row) => row.reviewStatus === reviewStatusFilter);
+  }, [runsQuery.data?.results, offset, reviewStatusFilter]);
 
-  const filteredRows = useMemo(() => {
-    return allRows.filter((row) => {
-      if (appliedFilters.searchClaimId &&
-          !row.claimId.toLowerCase().includes(appliedFilters.searchClaimId.toLowerCase())) {
-        return false;
-      }
-      if (appliedFilters.status && row.claimStatus !== appliedFilters.status) return false;
-      if (appliedFilters.reviewStatus && reviewStatusDisplay() !== appliedFilters.reviewStatus) {
-        return false;
-      }
-      return true;
-    });
-  }, [allRows, appliedFilters]);
-
-  const total = filteredRows.length;
-  const totalPages = Math.max(1, Math.ceil(total / rowsPerPage));
-  const startIdx = (currentPage - 1) * rowsPerPage;
-  const pageRows = filteredRows.slice(startIdx, startIdx + rowsPerPage);
-  const endIdx = Math.min(startIdx + rowsPerPage, total);
-
-  const handleApply = () => {
-    setAppliedFilters({
-      searchClaimId,
-      reviewStatus: reviewStatusFilter,
-      status: statusFilter as ClaimStatus | '',
-      fromDate,
-      toDate,
-    });
+  useEffect(() => {
     setCurrentPage(1);
-  };
+  }, [debouncedSearch, statusFilter, reviewStatusFilter, fromDate, toDate, rowsPerPage]);
+
+  const total = runsQuery.data?.count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / rowsPerPage));
+  const startIdx = total === 0 ? 0 : offset + 1;
+  const endIdx = Math.min(offset + pageRows.length, total);
 
   const handleClear = () => {
     setSearchClaimId('');
@@ -171,7 +191,6 @@ export default function ClaimsListingPage() {
     setStatusFilter('');
     setFromDate('');
     setToDate('');
-    setAppliedFilters({ searchClaimId: '', reviewStatus: '', status: '', fromDate: '', toDate: '' });
     setCurrentPage(1);
   };
 
@@ -191,14 +210,14 @@ export default function ClaimsListingPage() {
     return pages;
   })();
 
-  const avgProcessingTime = allRows.length
-    ? Math.round((allRows.reduce((sum, row) => sum + row.processingTimeMin, 0) / allRows.length) * 10) / 10
-    : 0;
+  const avgProcessingTime = runsQuery.data?.avg_processing_time_min ?? 0;
 
   const handleRowClick = (row: BatchTableRow) => {
     const params = new URLSearchParams({ batchId: row.batchId });
     if (row.runId) params.set('runId', row.runId);
-    navigate(`/claims/${encodeURIComponent(row.claimId)}?${params.toString()}`);
+    navigate(`/claims/${encodeURIComponent(row.claimId)}?${params.toString()}`, {
+      state: { listPreview: row },
+    });
   };
 
   return (
@@ -209,20 +228,20 @@ export default function ClaimsListingPage() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <StatCard icon={ClipboardList} label="Claims in Last Batch" value={allRows.length} />
+        <StatCard icon={ClipboardList} label="Total Claims Processed" value={total} />
         <StatCard icon={TrendingUp} label="Accuracy" value="—" />
         <StatCard icon={Clock} label="Avg Processing Time" value={avgProcessingTime} suffix=" min" />
       </div>
 
-      {!lastBatchId && (
+      {!runsQuery.isLoading && total === 0 && !runsQuery.error && (
         <div className="mb-4 p-3 border border-gray-200 bg-white rounded text-sm text-gray-600">
-          {canWrite ? 'No batch loaded — click Upload to run a workflow batch.' : 'No batch loaded yet.'}
+          {canWrite ? 'No claims processed yet — click Upload to run a workflow batch.' : 'No claims processed yet.'}
         </div>
       )}
 
-      {batchQuery.error && (
+      {runsQuery.error && (
         <div className="mb-4 p-3 border border-red-200 bg-red-50 rounded text-sm text-red-700">
-          {(batchQuery.error as Error).message}
+          {(runsQuery.error as Error).message}
         </div>
       )}
 
@@ -255,21 +274,15 @@ export default function ClaimsListingPage() {
             onChange={(e) => setStatusFilter(e.target.value)}
             className="px-3 py-1.5 text-sm border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#FF612B] focus:border-[#FF612B] text-gray-600"
           >
-            <option value="">All</option>
+            <option value="">Select Claim Status</option>
             <option value="CLEAN">Clean</option>
             <option value="DEFECT">Defect</option>
             <option value="INCONCLUSIVE">Inconclusive</option>
           </select>
 
-          <DateFilterInput value={fromDate} onChange={setFromDate} />
-          <DateFilterInput value={toDate} onChange={setToDate} />
+          <DateFilterInput value={fromDate} onChange={setFromDate} placeholder="From date" />
+          <DateFilterInput value={toDate} onChange={setToDate} placeholder="To date" />
 
-          <button
-            onClick={handleApply}
-            className="px-4 py-1.5 text-sm font-medium text-white bg-[#FF612B] hover:bg-[#e5561f] rounded transition-colors"
-          >
-            Apply
-          </button>
           <button
             onClick={handleClear}
             className="px-4 py-1.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded transition-colors"
@@ -298,6 +311,7 @@ export default function ClaimsListingPage() {
                   'CLAIM STATUS',
                   'REVIEW STATUS',
                   'PROCESSING TIME (MIN)',
+                  'STARTED AT',
                   'FINISHED AT',
                 ].map((col) => (
                   <th
@@ -310,22 +324,18 @@ export default function ClaimsListingPage() {
               </tr>
             </thead>
             <tbody>
-              {!lastBatchId ? (
+              {runsQuery.isLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-400">
-                    Run a batch to populate the audit review table.
-                  </td>
-                </tr>
-              ) : batchQuery.isLoading ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-400">
-                    Loading batch runs...
+                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-400">
+                    Loading processed claims...
                   </td>
                 </tr>
               ) : pageRows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-400">
-                    No claims found matching your filters.
+                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-400">
+                    {debouncedSearch || statusFilter || reviewStatusFilter || fromDate || toDate
+                      ? 'No claims found matching your filters.'
+                      : 'No processed claims yet. Run a batch to populate the audit review table.'}
                   </td>
                 </tr>
               ) : (
@@ -341,10 +351,11 @@ export default function ClaimsListingPage() {
                       <AiStatusChip status={row.claimStatus} />
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
-                      <ReviewStatusChip status={reviewStatusDisplay()} />
+                      <ReviewStatusChip status={row.reviewStatus} />
                     </td>
                     <td className="px-3 py-2 text-gray-600 tabular-nums">{row.processingTimeMin}</td>
-                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.finishedAt}</td>
+                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.startedAt || '—'}</td>
+                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.finishedAt || '—'}</td>
                   </tr>
                 ))
               )}
@@ -356,7 +367,7 @@ export default function ClaimsListingPage() {
           <div className="flex items-center gap-1">
             <button
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1 || batchQuery.isLoading}
+              disabled={currentPage === 1 || runsQuery.isLoading}
               className="p-1 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <ChevronLeft className="h-4 w-4 text-gray-600" />
@@ -382,7 +393,7 @@ export default function ClaimsListingPage() {
 
             <button
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              disabled={currentPage >= totalPages || batchQuery.isLoading || total === 0}
+              disabled={currentPage >= totalPages || runsQuery.isLoading || total === 0}
               className="p-1 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <ChevronRight className="h-4 w-4 text-gray-600" />
@@ -391,7 +402,7 @@ export default function ClaimsListingPage() {
 
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-500">
-              Showing {total === 0 ? 0 : startIdx + 1}–{endIdx} of {total} entries
+              Showing {startIdx}–{endIdx} of {total} entries
             </span>
             <div className="flex items-center gap-2">
               <select

@@ -1,12 +1,19 @@
 import { API_BASE, ApiError } from '@/lib/api';
+import { clearAuth } from '@/utils/auth';
+import { buildLoginPath } from '@/utils/redirect';
 import type {
   AsyncBatchResponse,
   BatchDetail,
   BatchEventType,
+  ClaimAgentsSnapshot,
   ClaimProcessingSnapshot,
+  ClaimSummarySnapshot,
   ClaimTraceStep,
+  ProcessedRunsPage,
+  ProcessedRunsQuery,
   RunDetail,
   RunNodesPayload,
+  RunSummary,
   Workflow,
 } from '@/types/execute';
 
@@ -42,9 +49,20 @@ function buildUploadForm(file: File, options?: BatchUploadOptions): FormData {
   return body;
 }
 
+function handleUnauthorized(res: Response): void {
+  if (res.status !== 401 || typeof window === 'undefined') return;
+  clearAuth();
+  const path = window.location.pathname;
+  if (path !== '/login' && path !== '/register') {
+    const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.location.replace(buildLoginPath(returnTo));
+  }
+}
+
 async function checkResponse<T>(res: Response, fallback: string): Promise<T> {
   const payload = await parseJson(res);
   if (!res.ok) {
+    handleUnauthorized(res);
     throw new ApiError(res.status, jsonMessage(payload, fallback), payload);
   }
   return payload as T;
@@ -94,6 +112,55 @@ export async function runBatchAsync(
   return checkResponse<AsyncBatchResponse>(res, `run-batch-async failed (${res.status})`);
 }
 
+export async function listProcessedRuns(
+  token: string,
+  options?: ProcessedRunsQuery,
+): Promise<ProcessedRunsPage> {
+  const params = new URLSearchParams();
+  if (options?.limit != null) params.set('limit', String(options.limit));
+  if (options?.offset != null) params.set('offset', String(options.offset));
+  if (options?.claimId) params.set('claim_id', options.claimId);
+  if (options?.claimStatus) params.set('claim_status', options.claimStatus);
+  if (options?.fromDate) params.set('from_date', options.fromDate);
+  if (options?.toDate) params.set('to_date', options.toDate);
+  const qs = params.toString();
+  const url = `${API_BASE}/api/execute/runs/${qs ? `?${qs}` : ''}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 401) {
+    handleUnauthorized(res);
+    return { count: 0, limit: 0, offset: 0, results: [] };
+  }
+  return checkResponse<ProcessedRunsPage>(res, `list-runs failed (${res.status})`);
+}
+
+/** Fetch every processed claim run (pages through the API automatically). */
+export async function listAllProcessedRuns(token: string): Promise<RunSummary[]> {
+  const pageSize = 500;
+  let offset = 0;
+  const all: RunSummary[] = [];
+  while (true) {
+    const page = await listProcessedRuns(token, { limit: pageSize, offset });
+    all.push(...page.results);
+    if (all.length >= page.count || page.results.length === 0) break;
+    offset += pageSize;
+  }
+  return all;
+}
+
+export async function getLatestBatch(token: string): Promise<BatchDetail | null> {
+  const res = await fetch(`${API_BASE}/api/execute/batches/latest/`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 404) return null;
+  if (res.status === 401) {
+    handleUnauthorized(res);
+    return null;
+  }
+  return checkResponse<BatchDetail>(res, `get-latest-batch failed (${res.status})`);
+}
+
 export async function getBatch(token: string, batchId: string): Promise<BatchDetail | null> {
   const res = await fetch(`${API_BASE}/api/execute/batches/${batchId}/`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -118,18 +185,56 @@ export async function getRunNodes(token: string, runId: string): Promise<RunNode
   return checkResponse<RunNodesPayload>(res, `get-run-nodes failed (${res.status})`);
 }
 
+function claimDetailUrl(
+  claimId: string,
+  section: 'summary' | 'agents' | 'processing',
+  options?: { runId?: string; batchId?: string },
+): string {
+  const params = new URLSearchParams();
+  if (options?.runId) params.set('run_id', options.runId);
+  if (options?.batchId) params.set('batch_id', options.batchId);
+  const qs = params.toString();
+  return `${API_BASE}/api/claims/${encodeURIComponent(claimId)}/${section}/${qs ? `?${qs}` : ''}`;
+}
+
+export async function getClaimSummary(
+  token: string,
+  claimId: string,
+  options?: { runId?: string; batchId?: string },
+): Promise<ClaimSummarySnapshot | null> {
+  const res = await fetch(claimDetailUrl(claimId, 'summary', options), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 404) return null;
+  if (res.status === 401) {
+    handleUnauthorized(res);
+    return null;
+  }
+  return checkResponse<ClaimSummarySnapshot>(res, `claim summary failed (${res.status})`);
+}
+
+export async function getClaimAgents(
+  token: string,
+  claimId: string,
+  options?: { runId?: string; batchId?: string },
+): Promise<ClaimAgentsSnapshot | null> {
+  const res = await fetch(claimDetailUrl(claimId, 'agents', options), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 404) return null;
+  if (res.status === 401) {
+    handleUnauthorized(res);
+    return null;
+  }
+  return checkResponse<ClaimAgentsSnapshot>(res, `claim agents failed (${res.status})`);
+}
+
 export async function getClaimProcessing(
   token: string,
   claimId: string,
   options?: { runId?: string; batchId?: string },
 ): Promise<ClaimProcessingSnapshot | null> {
-  const params = new URLSearchParams();
-  if (options?.runId) params.set('run_id', options.runId);
-  if (options?.batchId) params.set('batch_id', options.batchId);
-  const qs = params.toString();
-  const url = `${API_BASE}/api/claims/${encodeURIComponent(claimId)}/processing/${qs ? `?${qs}` : ''}`;
-
-  const res = await fetch(url, {
+  const res = await fetch(claimDetailUrl(claimId, 'processing', options), {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (res.status === 404) return null;

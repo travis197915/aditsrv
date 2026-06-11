@@ -1,4 +1,5 @@
 import { clearAuth, getToken } from '@/utils/auth';
+import { buildLoginPath } from '@/utils/redirect';
 
 export const API_BASE = (
   import.meta.env.VITE_API_BASE_URL ??
@@ -50,10 +51,13 @@ function makeClient(baseUrl: string) {
 
     if (res.status === 401) {
       clearAuth();
-      const path = typeof window !== 'undefined' ? window.location.pathname : '';
-      const isPublicAuth = path === '/login' || path === '/register';
-      if (typeof window !== 'undefined' && !isPublicAuth) {
-        window.location.replace('/login');
+      if (typeof window !== 'undefined') {
+        const path = window.location.pathname;
+        const isPublicAuth = path === '/login' || path === '/register';
+        if (!isPublicAuth) {
+          const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+          window.location.replace(buildLoginPath(returnTo));
+        }
       }
     }
 
