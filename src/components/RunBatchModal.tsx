@@ -14,6 +14,9 @@ type RunBatchModalProps = {
 
 const ORANGE = '#FF612B';
 
+/** Hardcoded for now — set VITE_DEFAULT_WORKFLOW_ID in .env */
+const DEFAULT_WORKFLOW_ID = import.meta.env.VITE_DEFAULT_WORKFLOW_ID ?? '';
+
 function getWorkflowLabel(wf: Workflow): string {
   if (typeof wf.name === 'string' && wf.name.trim()) return wf.name;
   if (typeof wf.title === 'string' && wf.title.trim()) return wf.title as string;
@@ -25,7 +28,7 @@ export default function RunBatchModal({ open, onClose }: RunBatchModalProps) {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [workflowId, setWorkflowId] = useState('');
+  const workflowId = DEFAULT_WORKFLOW_ID;
   const [file, setFile] = useState<File | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [claimIdColumn, setClaimIdColumn] = useState('');
@@ -41,6 +44,11 @@ export default function RunBatchModal({ open, onClose }: RunBatchModalProps) {
     staleTime: 0,
     refetchOnMount: 'always',
   });
+
+  const selectedWorkflow = useMemo(
+    () => (workflowsQuery.data ?? []).find((wf) => wf.id === workflowId),
+    [workflowsQuery.data, workflowId],
+  );
 
   const canStart = useMemo(
     () => execution.status === 'IDLE' && !!workflowId && !!file,
@@ -115,19 +123,22 @@ export default function RunBatchModal({ open, onClose }: RunBatchModalProps) {
                 </label>
                 <select
                   value={workflowId}
-                  onChange={(e) => setWorkflowId(e.target.value)}
-                  disabled={workflowsQuery.isLoading || !!workflowsQuery.error}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#FF612B] focus:border-[#FF612B]"
+                  disabled
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded bg-gray-50 text-gray-600 cursor-not-allowed focus:outline-none"
                 >
-                  <option value="">
-                    {workflowsQuery.isLoading ? 'Loading workflows...' : 'Select a workflow'}
+                  <option value={workflowId}>
+                    {workflowsQuery.isLoading
+                      ? 'Loading workflow...'
+                      : selectedWorkflow
+                        ? getWorkflowLabel(selectedWorkflow)
+                        : workflowId || 'Workflow not configured'}
                   </option>
-                  {(workflowsQuery.data ?? []).map((wf) => (
-                    <option key={wf.id} value={wf.id}>
-                      {getWorkflowLabel(wf)}
-                    </option>
-                  ))}
                 </select>
+                {!workflowId ? (
+                  <p className="mt-1 text-xs text-red-600">
+                    Set VITE_DEFAULT_WORKFLOW_ID in your .env file.
+                  </p>
+                ) : null}
                 {workflowsQuery.error ? (
                   <p className="mt-1 text-xs text-red-600">
                     {(workflowsQuery.error as Error).message}
