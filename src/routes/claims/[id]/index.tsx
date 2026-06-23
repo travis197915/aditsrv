@@ -1018,7 +1018,7 @@ export default function ClaimDetailsPage() {
                 ) : (
                   <Play className="h-4 w-4" />
                 )}
-                Start Process
+                Start Review
               </button>
             ) : null}
             {live.active ? (
