@@ -122,6 +122,7 @@ export async function listProcessedRuns(
   if (options?.offset != null) params.set('offset', String(options.offset));
   if (options?.claimId) params.set('claim_id', options.claimId);
   if (options?.claimStatus) params.set('claim_status', options.claimStatus);
+  if (options?.reviewStatus) params.set('review_status', options.reviewStatus);
   if (options?.fromDate) params.set('from_date', options.fromDate);
   if (options?.toDate) params.set('to_date', options.toDate);
   const qs = params.toString();
@@ -350,6 +351,54 @@ export async function updateClaimReviewStatus(
     },
   );
   return checkResponse<unknown>(res, `update claim review-status failed (${res.status})`);
+}
+
+function claimReviewActionUrl(
+  claimId: string,
+  action: 'approve' | 'reject',
+  options?: { runId?: string; batchId?: string },
+): string {
+  const params = new URLSearchParams();
+  if (options?.runId) params.set('run_id', options.runId);
+  if (options?.batchId) params.set('batch_id', options.batchId);
+  const qs = params.toString();
+  return `${API_BASE}/api/claims/${encodeURIComponent(claimId)}/review/${action}/${qs ? `?${qs}` : ''}`;
+}
+
+export async function approveClaimReview(
+  token: string,
+  claimId: string,
+  feedback: string,
+  options?: { runId?: string; batchId?: string },
+): Promise<unknown> {
+  const res = await fetch(claimReviewActionUrl(claimId, 'approve', options), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ feedback }),
+  });
+  return checkResponse<unknown>(res, `approve claim review failed (${res.status})`);
+}
+
+export async function rejectClaimReview(
+  token: string,
+  claimId: string,
+  feedback: string,
+  options?: { runId?: string; batchId?: string },
+): Promise<unknown> {
+  const res = await fetch(claimReviewActionUrl(claimId, 'reject', options), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ feedback }),
+  });
+  return checkResponse<unknown>(res, `reject claim review failed (${res.status})`);
 }
 
 export async function subscribeBatchEvents(

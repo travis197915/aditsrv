@@ -96,6 +96,5 @@ export function ReviewWorkflowStatusChip({ status }: { status: ReviewWorkflowSta
 }
 
 export function ReviewWorkflowStatusCell({ status }: { status: ReviewWorkflowStatus | undefined }) {
-  if (!status) return <span className="text-gray-500">—</span>;
-  return <ReviewWorkflowStatusChip status={status} />;
+  return <ReviewWorkflowStatusChip status={status ?? 'pending'} />;
 }

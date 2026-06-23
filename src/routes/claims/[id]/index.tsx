@@ -4,9 +4,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp, Clock, Check, X, Loader2, Play } from 'lucide-react';
 import TopNavLayout from '@/layouts/TopNavLayout';
 import { AiStatusChip } from '@/components/StatusChip';
-import { getClaimAgents, getClaimSummary, getClaimTrace, updateClaimReviewStatus } from '@/lib/execute';
+import { getClaimAgents, getClaimSummary, getClaimTrace, updateClaimReviewStatus, approveClaimReview, rejectClaimReview } from '@/lib/execute';
 import { processFor } from '@/lib/process';
-import { aggregateTraceAudit, reviewWorkflowStatusOrDefault, reviewWorkflowStatusLabel } from '@/lib/status';
+import { aggregateTraceAudit, readFeedbackFromRecord, readReviewStatusRaw, reviewWorkflowStatusOrDefault, reviewWorkflowStatusLabel } from '@/lib/status';
 import { useLiveClaimRun, liveShapeToAgent } from '@/lib/useLiveClaimRun';
 import type {
   ClaimProcessingAgent,
@@ -15,22 +15,16 @@ import type {
   ClaimTraceStep,
   ReviewWorkflowStatus,
 } from '@/types/execute';
-import { useAuth } from '@/contexts/AuthContext';
 import { getToken } from '@/utils/auth';
 
 const ORANGE = '#FF612B';
 
 function reviewStatusFromSnapshot(
-  snapshot: { reviewStatus?: unknown; review_status?: unknown } | null | undefined,
+  snapshot: Record<string, unknown> | null | undefined,
 ): ReviewWorkflowStatus | undefined {
   if (!snapshot) return undefined;
-  const raw =
-    typeof snapshot.reviewStatus === 'string'
-      ? snapshot.reviewStatus
-      : typeof snapshot.review_status === 'string'
-        ? snapshot.review_status
-        : undefined;
-  return raw !== undefined ? reviewWorkflowStatusOrDefault(raw) : undefined;
+  const raw = readReviewStatusRaw(snapshot);
+  return raw ? reviewWorkflowStatusOrDefault(raw) : undefined;
 }
 
 /** Rule-level verdict chip: shows the SOP rule outcome in the auditor's native
@@ -438,6 +432,8 @@ type ClaimListPreview = {
   runId: string;
   batchId: string;
   claimStatus: ClaimStatus;
+  reviewStatus?: ReviewWorkflowStatus;
+  feedback?: string;
   runStatus: string;
   processingTimeMin: number;
   startedAt: string;
@@ -515,13 +511,14 @@ export default function ClaimDetailsPage() {
   const listPreview = (location.state as { listPreview?: ClaimListPreview } | null)
     ?.listPreview;
   const [searchParams] = useSearchParams();
-  const { canWrite } = useAuth();
   const token = getToken();
   const batchId = searchParams.get('batchId') ?? undefined;
   const runId = searchParams.get('runId') ?? undefined;
 
   const [activeNav, setActiveNav] = useState<ClaimNavId>('summary');
   const [feedback, setFeedback] = useState('');
+  const [savedFeedbackOverride, setSavedFeedbackOverride] = useState<string | null>(null);
+  const [reviewActionError, setReviewActionError] = useState<string | null>(null);
   const [reviewWorkflowStatusOverride, setReviewWorkflowStatusOverride] =
     useState<ReviewWorkflowStatus | null>(null);
   const [startProcessError, setStartProcessError] = useState<string | null>(null);
@@ -529,6 +526,9 @@ export default function ClaimDetailsPage() {
   useEffect(() => {
     setReviewWorkflowStatusOverride(null);
     setStartProcessError(null);
+    setReviewActionError(null);
+    setFeedback('');
+    setSavedFeedbackOverride(null);
   }, [claimId, runId, batchId]);
 
   const claimOpts = { batchId, runId };
@@ -663,9 +663,10 @@ export default function ClaimDetailsPage() {
 
   const reviewWorkflowStatusFromApi = useMemo(
     () =>
-      reviewStatusFromSnapshot(summaryQuery.data)
-      ?? reviewStatusFromSnapshot(agentsQuery.data),
-    [summaryQuery.data, agentsQuery.data],
+      reviewStatusFromSnapshot(summaryQuery.data as Record<string, unknown> | null | undefined)
+      ?? reviewStatusFromSnapshot(agentsQuery.data as Record<string, unknown> | null | undefined)
+      ?? listPreview?.reviewStatus,
+    [summaryQuery.data, agentsQuery.data, listPreview?.reviewStatus],
   );
 
   const claimDataLoaded = summaryQuery.isFetched && !summaryQuery.isLoading;
@@ -674,6 +675,16 @@ export default function ClaimDetailsPage() {
     reviewWorkflowStatusOverride
     ?? reviewWorkflowStatusFromApi
     ?? (claimDataLoaded ? 'pending' : undefined);
+
+  const feedbackFromApi = useMemo(
+    () =>
+      readFeedbackFromRecord(summaryQuery.data as Record<string, unknown> | null | undefined)
+      ?? readFeedbackFromRecord(agentsQuery.data as Record<string, unknown> | null | undefined)
+      ?? (listPreview?.feedback?.trim() || undefined),
+    [summaryQuery.data, agentsQuery.data, listPreview?.feedback],
+  );
+
+  const savedFeedback = savedFeedbackOverride ?? feedbackFromApi ?? '';
 
   const showStartProcess =
     claimDataLoaded
@@ -703,6 +714,61 @@ export default function ClaimDetailsPage() {
   });
 
   const canStartProcess = showStartProcess && !startProcessMutation.isPending;
+
+  const reviewActionOpts = {
+    runId: effectiveRunId,
+    batchId: effectiveBatchId,
+  };
+
+  const invalidateClaimQueries = () => {
+    void queryClient.invalidateQueries({ queryKey: ['claim-summary', claimId] });
+    void queryClient.invalidateQueries({ queryKey: ['claim-agents', claimId] });
+    void queryClient.invalidateQueries({ queryKey: ['runs'] });
+  };
+
+  const approveMutation = useMutation({
+    mutationFn: async (submittedFeedback: string) => {
+      if (!token || !claimId) throw new Error('Missing claim context.');
+      await approveClaimReview(token, claimId, submittedFeedback, reviewActionOpts);
+      return submittedFeedback;
+    },
+    onSuccess: (submitted) => {
+      setReviewActionError(null);
+      setReviewWorkflowStatusOverride('completed');
+      setSavedFeedbackOverride(submitted);
+      setFeedback('');
+      invalidateClaimQueries();
+    },
+    onError: (err) => {
+      setReviewActionError(err instanceof Error ? err.message : 'Failed to approve claim.');
+    },
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: async (submittedFeedback: string) => {
+      if (!token || !claimId) throw new Error('Missing claim context.');
+      if (!submittedFeedback.trim()) throw new Error('Feedback is required to reject a claim.');
+      await rejectClaimReview(token, claimId, submittedFeedback, reviewActionOpts);
+      return submittedFeedback;
+    },
+    onSuccess: (submitted) => {
+      setReviewActionError(null);
+      setReviewWorkflowStatusOverride('completed');
+      setSavedFeedbackOverride(submitted);
+      setFeedback('');
+      invalidateClaimQueries();
+    },
+    onError: (err) => {
+      setReviewActionError(err instanceof Error ? err.message : 'Failed to reject claim.');
+    },
+  });
+
+  const reviewActionPending = approveMutation.isPending || rejectMutation.isPending;
+  const showReviewActions = reviewWorkflowStatus === 'in_progress';
+  const showSavedFeedback =
+    claimDataLoaded
+    && reviewWorkflowStatus === 'completed'
+    && !!savedFeedback.trim();
 
   const renderNavContent = () => {
     if (activeNav === 'agents') {
@@ -1053,35 +1119,62 @@ export default function ClaimDetailsPage() {
         </div>
       </div>
 
-      {canWrite && (
+      {showReviewActions && (
         <div className="mt-5 shrink-0 border border-[#e8ddd4] rounded-sm px-4 py-4 bg-[#fafafa]">
           <label className="block text-sm font-medium text-gray-800 mb-2">
             Feedback: <span className="text-red-500">*</span>
+            <span className="text-xs font-normal text-gray-500 ml-1">(required for reject)</span>
           </label>
           <textarea
             value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
+            onChange={(e) => {
+              setFeedback(e.target.value);
+              if (reviewActionError) setReviewActionError(null);
+            }}
             rows={3}
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded bg-white resize-none focus:outline-none focus:ring-1 focus:ring-[#FF612B] focus:border-[#FF612B]"
+            disabled={reviewActionPending}
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded bg-white resize-none focus:outline-none focus:ring-1 focus:ring-[#FF612B] focus:border-[#FF612B] disabled:opacity-60"
           />
+          {reviewActionError ? (
+            <p className="mt-2 text-sm text-red-600">{reviewActionError}</p>
+          ) : null}
           <div className="flex justify-end gap-3 mt-3">
             <button
               type="button"
-              disabled
+              onClick={() => approveMutation.mutate(feedback.trim())}
+              disabled={reviewActionPending}
               className="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white bg-[#2e9e5e] hover:bg-[#27854f] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
             >
-              <Check className="h-4 w-4" />
+              {approveMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Check className="h-4 w-4" />
+              )}
               Approve
             </button>
             <button
               type="button"
-              disabled
+              onClick={() => rejectMutation.mutate(feedback.trim())}
+              disabled={reviewActionPending || !feedback.trim()}
               className="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white bg-[#d32f2f] hover:bg-[#b71c1c] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
             >
-              <X className="h-4 w-4" />
+              {rejectMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <X className="h-4 w-4" />
+              )}
               Reject
             </button>
           </div>
+        </div>
+      )}
+
+      {showSavedFeedback && (
+        <div className="mt-5 shrink-0 border border-[#e8ddd4] rounded-sm px-4 py-4 bg-[#fafafa]">
+          <label className="block text-sm font-medium text-gray-800 mb-2">Feedback</label>
+          <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap rounded border border-gray-200 bg-white px-3 py-2.5">
+            {savedFeedback}
+          </p>
         </div>
       )}
       </div>

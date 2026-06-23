@@ -12,7 +12,7 @@ import RunBatchModal from '@/components/RunBatchModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { listProcessedRuns } from '@/lib/execute';
 import { getToken } from '@/utils/auth';
-import { normalizeAuditStatus, decisionToAuditStatus, reviewWorkflowStatusOrDefault } from '@/lib/status';
+import { normalizeAuditStatus, decisionToAuditStatus, readFeedbackFromRecord, reviewWorkflowStatusFromRun } from '@/lib/status';
 import type { ClaimStatus, ReviewWorkflowStatus, RunSummary } from '@/types/execute';
 
 type BatchTableRow = {
@@ -21,6 +21,7 @@ type BatchTableRow = {
   batchId: string;
   claimStatus: ClaimStatus;
   reviewStatus: ReviewWorkflowStatus;
+  feedback: string;
   runStatus: string;
   processingTimeMin: number;
   startedAt: string;
@@ -46,13 +47,7 @@ function mmDdYyyyToIso(value: string): string {
 }
 
 function deriveReviewWorkflowStatus(run: RunSummary): ReviewWorkflowStatus {
-  const raw =
-    typeof run.review_status === 'string'
-      ? run.review_status
-      : typeof run.reviewStatus === 'string'
-        ? run.reviewStatus
-        : undefined;
-  return reviewWorkflowStatusOrDefault(raw);
+  return reviewWorkflowStatusFromRun(run as Record<string, unknown>);
 }
 
 function StatCard({
@@ -155,6 +150,7 @@ function mapRunToRow(run: RunSummary, idx: number): BatchTableRow {
     batchId,
     claimStatus: deriveClaimStatus(run),
     reviewStatus: deriveReviewWorkflowStatus(run),
+    feedback: readFeedbackFromRecord(run as Record<string, unknown>) ?? '',
     runStatus: String(run.run_status ?? run.status ?? ''),
     processingTimeMin: Number(run.processing_time_min ?? run.transaction_time_min ?? 0),
     startedAt: run.started_at_date && run.started_at
@@ -271,6 +267,7 @@ export default function ClaimsListingPage() {
       rowsPerPage,
       applied.claimId,
       applied.status,
+      applied.reviewStatus,
       fromIso,
       toIso,
     ],
@@ -280,6 +277,7 @@ export default function ClaimsListingPage() {
         offset,
         claimId: applied.claimId || undefined,
         claimStatus: applied.status || undefined,
+        reviewStatus: applied.reviewStatus || undefined,
         fromDate: fromIso || undefined,
         toDate: toIso || undefined,
       }),
@@ -288,12 +286,10 @@ export default function ClaimsListingPage() {
   });
 
   const pageRows = useMemo(() => {
-    const rows = (runsQuery.data?.results ?? []).map((run, idx) =>
+    return (runsQuery.data?.results ?? []).map((run, idx) =>
       mapRunToRow(run, offset + idx),
     );
-    if (!applied.reviewStatus) return rows;
-    return rows.filter((row) => row.reviewStatus === applied.reviewStatus);
-  }, [runsQuery.data?.results, offset, applied.reviewStatus]);
+  }, [runsQuery.data?.results, offset]);
 
   // Reset to page 1 when rows-per-page changes
   useEffect(() => {

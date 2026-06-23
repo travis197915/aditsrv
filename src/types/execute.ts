@@ -38,6 +38,7 @@ export interface ProcessedRunsQuery {
   offset?: number;
   claimId?: string;
   claimStatus?: string;
+  reviewStatus?: string;
   fromDate?: string;
   toDate?: string;
 }
@@ -60,6 +61,8 @@ export interface RunSummary {
   finished_at_date?: string;
   review_status?: string;
   reviewStatus?: string;
+  auditor_status?: string;
+  auditorStatus?: string;
   [key: string]: unknown;
 }
 
@@ -213,6 +216,7 @@ export interface ClaimSummarySnapshot extends ClaimRunHeader {
 export interface ClaimAgentsSnapshot extends ClaimRunHeader {
   agents: ClaimProcessingAgent[];
   reviewStatus?: ReviewWorkflowStatus | string | null;
+  feedback?: string | null;
 }
 
 /** @deprecated Use ClaimSummarySnapshot / ClaimAgentsSnapshot per tab. */
