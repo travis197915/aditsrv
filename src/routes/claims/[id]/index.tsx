@@ -3,6 +3,8 @@ import { useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp, Clock, Check, X, Loader2, Play } from 'lucide-react';
 import TopNavLayout from '@/layouts/TopNavLayout';
+import AiGeneratedBanner from '@/components/AiGeneratedBanner';
+import InfoTooltipTrigger from '@/components/InfoTooltipTrigger';
 import { AiStatusChip } from '@/components/StatusChip';
 import { getClaimAgents, getClaimSummary, getClaimTrace, updateClaimReviewStatus, approveClaimReview, rejectClaimReview } from '@/lib/execute';
 import { processFor } from '@/lib/process';
@@ -420,9 +422,24 @@ function AgentCard({
 }
 
 const LEFT_NAV_ITEMS = [
-  { id: 'summary', label: 'Overall Claim Process Summarization' },
-  { id: 'agents', label: 'Agents Execution Selection' },
-  { id: 'trace', label: 'Explainability Trace' },
+  {
+    id: 'summary',
+    label: 'Overall Claim Process Summarization',
+    tooltip:
+      'High-level summary of how each AI agent processed this claim, including key outcomes and process highlights.',
+  },
+  {
+    id: 'agents',
+    label: 'Agents Execution Selection',
+    tooltip:
+      'Detailed rule evaluations, process summaries, and step-level execution for each agent in the workflow.',
+  },
+  {
+    id: 'trace',
+    label: 'Explainability Trace',
+    tooltip:
+      'Step-by-step SOP rule trace with rationale, tool calls, subrules, and evidence references.',
+  },
 ] as const;
 
 type ClaimNavId = (typeof LEFT_NAV_ITEMS)[number]['id'];
@@ -1024,6 +1041,8 @@ export default function ClaimDetailsPage() {
         </div>
       </div>
 
+      <AiGeneratedBanner />
+
       <div className="shrink-0 flex flex-wrap items-start gap-x-10 gap-y-3 mb-5">
         <div>
           <div className="text-sm text-gray-600 mb-1">Claim ID :</div>
@@ -1102,8 +1121,19 @@ export default function ClaimDetailsPage() {
                   }`}
                   style={isActive ? { backgroundColor: ORANGE } : undefined}
                 >
-                  <span className="flex items-center gap-2">
-                    {item.label}
+                  <span className="flex items-start gap-1.5 w-full">
+                    <span className="flex-1">{item.label}</span>
+                    <span
+                      className="shrink-0 mt-0.5"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <InfoTooltipTrigger
+                        text={item.tooltip}
+                        ariaLabel={`About ${item.label}`}
+                        variant={isActive ? 'onAccent' : 'default'}
+                      />
+                    </span>
                     {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" /> : null}
                   </span>
                 </button>

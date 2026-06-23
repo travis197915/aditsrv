@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LogOut, User } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import AppFooter from '@/components/AppFooter';
 
 interface TopNavLayoutProps {
   children: ReactNode;
@@ -67,7 +68,7 @@ export default function TopNavLayout({ children, showBack }: TopNavLayoutProps) 
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen bg-[#f5f5f5]">
+    <div className="min-h-screen bg-[#f5f5f5] flex flex-col">
       <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
         <div className="flex items-center justify-between px-6 h-14">
           <button type="button" onClick={() => navigate('/claims')} className="shrink-0">
@@ -90,9 +91,11 @@ export default function TopNavLayout({ children, showBack }: TopNavLayoutProps) 
         <div className="h-[3px] bg-[#FF612B]" />
       </header>
 
-      <main className="px-6 py-6">
+      <main className="flex-1 px-6 py-6">
         {children}
       </main>
+
+      <AppFooter />
     </div>
   );
 }
