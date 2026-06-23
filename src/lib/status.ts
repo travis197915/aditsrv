@@ -57,3 +57,29 @@ export function aggregateTraceAudit(
   if (mapped.every((s) => s === 'CLEAN')) return 'CLEAN';
   return 'INCONCLUSIVE';
 }
+
+export type ReviewWorkflowStatus = 'pending' | 'in_progress' | 'completed';
+
+/** Normalize auditor review workflow status from API payloads. */
+export function normalizeReviewWorkflowStatus(
+  raw: string | null | undefined,
+): ReviewWorkflowStatus | undefined {
+  const s = String(raw ?? '').trim().toLowerCase().replace(/-/g, '_');
+  if (s === 'pending' || s === 'in_progress' || s === 'completed') return s;
+  return undefined;
+}
+
+/** Missing or unknown API values are treated as pending (waiting for auditor). */
+export function reviewWorkflowStatusOrDefault(
+  raw: string | null | undefined,
+): ReviewWorkflowStatus {
+  return normalizeReviewWorkflowStatus(raw) ?? 'pending';
+}
+
+export function reviewWorkflowStatusLabel(status: ReviewWorkflowStatus): string {
+  switch (status) {
+    case 'pending': return 'Pending';
+    case 'in_progress': return 'In Progress';
+    case 'completed': return 'Completed';
+  }
+}

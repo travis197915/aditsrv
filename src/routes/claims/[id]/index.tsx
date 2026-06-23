@@ -1,23 +1,37 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useParams, useSearchParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronUp, Clock, Check, X, Loader2 } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ChevronDown, ChevronUp, Clock, Check, X, Loader2, Play } from 'lucide-react';
 import TopNavLayout from '@/layouts/TopNavLayout';
 import { AiStatusChip } from '@/components/StatusChip';
-import { getClaimAgents, getClaimSummary, getClaimTrace } from '@/lib/execute';
+import { getClaimAgents, getClaimSummary, getClaimTrace, updateClaimReviewStatus } from '@/lib/execute';
 import { processFor } from '@/lib/process';
-import { aggregateTraceAudit } from '@/lib/status';
+import { aggregateTraceAudit, reviewWorkflowStatusOrDefault, reviewWorkflowStatusLabel } from '@/lib/status';
 import { useLiveClaimRun, liveShapeToAgent } from '@/lib/useLiveClaimRun';
 import type {
   ClaimProcessingAgent,
   ClaimStatus,
   ClaimSummaryAgent,
   ClaimTraceStep,
+  ReviewWorkflowStatus,
 } from '@/types/execute';
 import { useAuth } from '@/contexts/AuthContext';
 import { getToken } from '@/utils/auth';
 
 const ORANGE = '#FF612B';
+
+function reviewStatusFromSnapshot(
+  snapshot: { reviewStatus?: unknown; review_status?: unknown } | null | undefined,
+): ReviewWorkflowStatus | undefined {
+  if (!snapshot) return undefined;
+  const raw =
+    typeof snapshot.reviewStatus === 'string'
+      ? snapshot.reviewStatus
+      : typeof snapshot.review_status === 'string'
+        ? snapshot.review_status
+        : undefined;
+  return raw !== undefined ? reviewWorkflowStatusOrDefault(raw) : undefined;
+}
 
 /** Rule-level verdict chip: shows the SOP rule outcome in the auditor's native
  *  vocabulary (Met / Not-Met / Inconclusive), distinct from the rolled-up
@@ -508,13 +522,21 @@ export default function ClaimDetailsPage() {
 
   const [activeNav, setActiveNav] = useState<ClaimNavId>('summary');
   const [feedback, setFeedback] = useState('');
+  const [reviewWorkflowStatusOverride, setReviewWorkflowStatusOverride] =
+    useState<ReviewWorkflowStatus | null>(null);
+  const [startProcessError, setStartProcessError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setReviewWorkflowStatusOverride(null);
+    setStartProcessError(null);
+  }, [claimId, runId, batchId]);
 
   const claimOpts = { batchId, runId };
 
   const summaryQuery = useQuery({
     queryKey: ['claim-summary', claimId, batchId, runId],
     queryFn: () => getClaimSummary(token!, claimId!, claimOpts),
-    enabled: !!token && !!claimId && activeNav === 'summary',
+    enabled: !!token && !!claimId,
     refetchOnWindowFocus: false,
     staleTime: 5 * 60 * 1000,
     refetchInterval: (query) => {
@@ -636,6 +658,51 @@ export default function ClaimDetailsPage() {
         }
       : undefined);
   const headerClaimStatus = header?.claimStatus ?? 'INCONCLUSIVE';
+  const effectiveRunId = header?.runId || runId;
+  const effectiveBatchId = header?.batchId || batchId;
+
+  const reviewWorkflowStatusFromApi = useMemo(
+    () =>
+      reviewStatusFromSnapshot(summaryQuery.data)
+      ?? reviewStatusFromSnapshot(agentsQuery.data),
+    [summaryQuery.data, agentsQuery.data],
+  );
+
+  const claimDataLoaded = summaryQuery.isFetched && !summaryQuery.isLoading;
+
+  const reviewWorkflowStatus: ReviewWorkflowStatus | undefined =
+    reviewWorkflowStatusOverride
+    ?? reviewWorkflowStatusFromApi
+    ?? (claimDataLoaded ? 'pending' : undefined);
+
+  const showStartProcess =
+    claimDataLoaded
+    && reviewWorkflowStatus === 'pending'
+    && !!effectiveRunId;
+
+  const startProcessMutation = useMutation({
+    mutationFn: async () => {
+      if (!token || !claimId || !effectiveRunId) {
+        throw new Error('Missing claim or run context.');
+      }
+      return updateClaimReviewStatus(token, claimId, 'in_progress', {
+        runId: effectiveRunId,
+        batchId: effectiveBatchId,
+      });
+    },
+    onSuccess: () => {
+      setStartProcessError(null);
+      setReviewWorkflowStatusOverride('in_progress');
+      void queryClient.invalidateQueries({ queryKey: ['claim-summary', claimId] });
+      void queryClient.invalidateQueries({ queryKey: ['claim-agents', claimId] });
+      void queryClient.invalidateQueries({ queryKey: ['runs'] });
+    },
+    onError: (err) => {
+      setStartProcessError(err instanceof Error ? err.message : 'Failed to start review.');
+    },
+  });
+
+  const canStartProcess = showStartProcess && !startProcessMutation.isPending;
 
   const renderNavContent = () => {
     if (activeNav === 'agents') {
@@ -854,19 +921,41 @@ export default function ClaimDetailsPage() {
             Review the AI agent execution details for this claim.
           </p>
         </div>
-        {live.active ? (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded border bg-amber-50 text-amber-700 border-amber-200">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            LIVE · streaming{' '}
-            {live.eventCount > 0 ? `${live.eventCount} events` : '…'}
-          </span>
-        ) : null}
-        {live.error && !live.active ? (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded border bg-red-50 text-red-700 border-red-200">
-            <X className="h-3 w-3" />
-            SSE error: {live.error}
-          </span>
-        ) : null}
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <div className="flex items-center gap-2">
+            {showStartProcess ? (
+              <button
+                type="button"
+                onClick={() => startProcessMutation.mutate()}
+                disabled={!canStartProcess}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-[#FF612B] hover:bg-[#e5551f] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
+              >
+                {startProcessMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
+                Start Process
+              </button>
+            ) : null}
+            {live.active ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded border bg-amber-50 text-amber-700 border-amber-200">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                LIVE · streaming{' '}
+                {live.eventCount > 0 ? `${live.eventCount} events` : '…'}
+              </span>
+            ) : null}
+            {live.error && !live.active ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded border bg-red-50 text-red-700 border-red-200">
+                <X className="h-3 w-3" />
+                SSE error: {live.error}
+              </span>
+            ) : null}
+          </div>
+          {startProcessError ? (
+            <p className="text-xs text-red-600 max-w-xs text-right">{startProcessError}</p>
+          ) : null}
+        </div>
       </div>
 
       <div className="shrink-0 flex flex-wrap items-start gap-x-10 gap-y-3 mb-5">
@@ -890,6 +979,26 @@ export default function ClaimDetailsPage() {
           <div className="text-sm text-gray-600 mb-1">Claim Status :</div>
           {header ? (
             <AiStatusChip status={headerClaimStatus} />
+          ) : (
+            <span className="text-sm text-gray-400">—</span>
+          )}
+        </div>
+        <div>
+          <div className="text-sm text-gray-600 mb-1">Review Status :</div>
+          {!claimDataLoaded ? (
+            <span className="text-sm text-gray-400">—</span>
+          ) : reviewWorkflowStatus ? (
+            <span
+              className={`inline-flex items-center px-2.5 py-0.5 text-xs font-semibold rounded border ${
+                reviewWorkflowStatus === 'in_progress'
+                  ? 'bg-amber-50 text-amber-800 border-amber-200'
+                  : reviewWorkflowStatus === 'completed'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : 'bg-gray-50 text-gray-700 border-gray-200'
+              }`}
+            >
+              {reviewWorkflowStatusLabel(reviewWorkflowStatus)}
+            </span>
           ) : (
             <span className="text-sm text-gray-400">—</span>
           )}

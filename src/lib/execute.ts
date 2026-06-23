@@ -11,6 +11,7 @@ import type {
   ClaimTraceStep,
   ProcessedRunsPage,
   ProcessedRunsQuery,
+  ReviewWorkflowStatus,
   RunDetail,
   RunNodesPayload,
   RunSummary,
@@ -304,6 +305,51 @@ export async function downloadClaimTraceJson(
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+export async function updateRunReviewStatus(
+  token: string,
+  runId: string,
+  reviewStatus: ReviewWorkflowStatus,
+): Promise<unknown> {
+  const res = await fetch(
+    `${API_BASE}/api/execute/runs/${encodeURIComponent(runId)}/review-status/`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ reviewStatus }),
+    },
+  );
+  return checkResponse<unknown>(res, `update run review-status failed (${res.status})`);
+}
+
+export async function updateClaimReviewStatus(
+  token: string,
+  claimId: string,
+  reviewStatus: ReviewWorkflowStatus,
+  options?: { runId?: string; batchId?: string },
+): Promise<unknown> {
+  const params = new URLSearchParams();
+  if (options?.runId) params.set('run_id', options.runId);
+  if (options?.batchId) params.set('batch_id', options.batchId);
+  const qs = params.toString();
+  const res = await fetch(
+    `${API_BASE}/api/claims/${encodeURIComponent(claimId)}/review-status/${qs ? `?${qs}` : ''}`,
+    {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ reviewStatus }),
+    },
+  );
+  return checkResponse<unknown>(res, `update claim review-status failed (${res.status})`);
 }
 
 export async function subscribeBatchEvents(

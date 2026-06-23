@@ -6,22 +6,21 @@ import {
   Newspaper, TrendingUp, Clock, FileText, Eye,
 } from 'lucide-react';
 import TopNavLayout from '@/layouts/TopNavLayout';
-import { AiStatusChip, ReviewStatusChip } from '@/components/StatusChip';
+import { AiStatusChip, ReviewWorkflowStatusCell } from '@/components/StatusChip';
 import DateFilterInput from '@/components/DateFilterInput';
 import RunBatchModal from '@/components/RunBatchModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { listProcessedRuns } from '@/lib/execute';
 import { getToken } from '@/utils/auth';
-import { normalizeAuditStatus, decisionToAuditStatus } from '@/lib/status';
-import type { ClaimStatus, RunSummary } from '@/types/execute';
-import type { ReviewStatus } from '@/types';
+import { normalizeAuditStatus, decisionToAuditStatus, reviewWorkflowStatusOrDefault } from '@/lib/status';
+import type { ClaimStatus, ReviewWorkflowStatus, RunSummary } from '@/types/execute';
 
 type BatchTableRow = {
   claimId: string;
   runId: string;
   batchId: string;
   claimStatus: ClaimStatus;
-  reviewStatus: ReviewStatus;
+  reviewStatus: ReviewWorkflowStatus;
   runStatus: string;
   processingTimeMin: number;
   startedAt: string;
@@ -46,10 +45,14 @@ function mmDdYyyyToIso(value: string): string {
   return `${year}-${month}-${day}`;
 }
 
-function deriveReviewStatus(run: RunSummary): ReviewStatus {
-  const raw = String(run.review_status ?? 'PENDING').toUpperCase();
-  if (raw === 'APPROVED' || raw === 'REJECTED') return raw;
-  return 'PENDING';
+function deriveReviewWorkflowStatus(run: RunSummary): ReviewWorkflowStatus {
+  const raw =
+    typeof run.review_status === 'string'
+      ? run.review_status
+      : typeof run.reviewStatus === 'string'
+        ? run.reviewStatus
+        : undefined;
+  return reviewWorkflowStatusOrDefault(raw);
 }
 
 function StatCard({
@@ -151,7 +154,7 @@ function mapRunToRow(run: RunSummary, idx: number): BatchTableRow {
     runId,
     batchId,
     claimStatus: deriveClaimStatus(run),
-    reviewStatus: deriveReviewStatus(run),
+    reviewStatus: deriveReviewWorkflowStatus(run),
     runStatus: String(run.run_status ?? run.status ?? ''),
     processingTimeMin: Number(run.processing_time_min ?? run.transaction_time_min ?? 0),
     startedAt: run.started_at_date && run.started_at
@@ -378,9 +381,9 @@ export default function ClaimsListingPage() {
             className="px-3 py-1.5 text-sm border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#FF612B] focus:border-[#FF612B] text-gray-600"
           >
             <option value="">Select Review Status</option>
-            <option value="APPROVED">Approved</option>
-            <option value="PENDING">Pending</option>
-            <option value="REJECTED">Rejected</option>
+            <option value="pending">Pending</option>
+            <option value="in_progress">In Progress</option>
+            <option value="completed">Completed</option>
           </select>
         </div>
 
@@ -478,7 +481,7 @@ export default function ClaimsListingPage() {
                 </tr>
               ) : (
                 pageRows.map((row) => {
-                  const isPending = row.reviewStatus === 'PENDING';
+                  const needsReview = row.reviewStatus === 'pending';
                   return (
                     <tr
                       key={`${row.claimId}-${row.runId}`}
@@ -498,7 +501,7 @@ export default function ClaimsListingPage() {
                         <AiStatusChip status={row.claimStatus} />
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap">
-                        <ReviewStatusChip status={row.reviewStatus} />
+                        <ReviewWorkflowStatusCell status={row.reviewStatus} />
                       </td>
                       <td className="px-3 py-2 text-gray-600 tabular-nums">{row.processingTimeMin}</td>
                       <td className="px-3 py-2 text-gray-500">%</td>
@@ -507,12 +510,12 @@ export default function ClaimsListingPage() {
                           type="button"
                           onClick={() => handleRowClick(row)}
                           className={`inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded ${
-                            isPending
+                            needsReview
                               ? 'bg-[#FF612B] text-white hover:bg-[#e5551f]'
                               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                           } transition-colors`}
                         >
-                          {isPending ? (
+                          {needsReview ? (
                             <>
                               <FileText className="h-3 w-3" />
                               Pending

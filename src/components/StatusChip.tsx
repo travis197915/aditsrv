@@ -1,6 +1,10 @@
-import { CheckCircle2, Clock, Flag, type LucideIcon } from 'lucide-react';
+import { CheckCircle2, Clock, Flag, Play, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { normalizeAuditStatus, type AuditStatus } from '@/lib/status';
+import {
+  normalizeAuditStatus,
+  type AuditStatus,
+  type ReviewWorkflowStatus,
+} from '@/lib/status';
 import type { ReviewStatus } from '@/types';
 
 type ChipStyle = {
@@ -45,6 +49,24 @@ const REVIEW_STATUS: Record<ReviewStatus, ChipStyle> = {
   },
 };
 
+const REVIEW_WORKFLOW_STATUS: Record<ReviewWorkflowStatus, ChipStyle> = {
+  pending: {
+    label: 'PENDING',
+    icon: Clock,
+    className: 'bg-[#fef3c7] text-[#92400e] border-[#fbbf24]',
+  },
+  in_progress: {
+    label: 'IN PROGRESS',
+    icon: Play,
+    className: 'bg-amber-50 text-amber-800 border-amber-200',
+  },
+  completed: {
+    label: 'COMPLETED',
+    icon: CheckCircle2,
+    className: 'bg-[#dcfce7] text-[#166534] border-[#4ade80]',
+  },
+};
+
 function StatusChipBase({ style }: { style: ChipStyle }) {
   const Icon = style.icon;
   return (
@@ -67,4 +89,13 @@ export function AiStatusChip({ status }: { status: string }) {
 
 export function ReviewStatusChip({ status }: { status: ReviewStatus }) {
   return <StatusChipBase style={REVIEW_STATUS[status] ?? REVIEW_STATUS.PENDING} />;
+}
+
+export function ReviewWorkflowStatusChip({ status }: { status: ReviewWorkflowStatus }) {
+  return <StatusChipBase style={REVIEW_WORKFLOW_STATUS[status]} />;
+}
+
+export function ReviewWorkflowStatusCell({ status }: { status: ReviewWorkflowStatus | undefined }) {
+  if (!status) return <span className="text-gray-500">—</span>;
+  return <ReviewWorkflowStatusChip status={status} />;
 }

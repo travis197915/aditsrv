@@ -16,6 +16,9 @@ export type BatchStatus = 'IDLE' | 'RUNNING' | 'DONE' | 'ERROR';
 
 export type ClaimStatus = 'CLEAN' | 'DEFECT' | 'INCONCLUSIVE';
 
+/** Auditor review workflow status (distinct from approve/reject ReviewStatus). */
+export type ReviewWorkflowStatus = 'pending' | 'in_progress' | 'completed';
+
 export interface Workflow {
   id: string;
   name: string;
@@ -56,6 +59,7 @@ export interface RunSummary {
   finished_at?: string;
   finished_at_date?: string;
   review_status?: string;
+  reviewStatus?: string;
   [key: string]: unknown;
 }
 
@@ -202,18 +206,19 @@ export interface ClaimSummaryAgent {
 export interface ClaimSummarySnapshot extends ClaimRunHeader {
   agents: ClaimSummaryAgent[];
   outerToolInvocations: OuterToolInvocation[];
-  reviewStatus: null;
-  feedback: null;
+  reviewStatus?: ReviewWorkflowStatus | string | null;
+  feedback?: string | null;
 }
 
 export interface ClaimAgentsSnapshot extends ClaimRunHeader {
   agents: ClaimProcessingAgent[];
+  reviewStatus?: ReviewWorkflowStatus | string | null;
 }
 
 /** @deprecated Use ClaimSummarySnapshot / ClaimAgentsSnapshot per tab. */
 export interface ClaimProcessingSnapshot extends ClaimRunHeader {
   agents: ClaimProcessingAgent[];
   outerToolInvocations: OuterToolInvocation[];
-  reviewStatus: null;
-  feedback: null;
+  reviewStatus?: ReviewWorkflowStatus | string | null;
+  feedback?: string | null;
 }
