@@ -145,9 +145,15 @@ export function readFeedbackFromRecord(
     record.auditorFeedback,
     record.review_feedback,
     record.reviewFeedback,
+    record.review_comment,
+    record.reviewComment,
+    record.auditor_comment,
+    record.auditorComment,
     nested?.feedback,
     nested?.auditor_feedback,
     nested?.auditorFeedback,
+    nested?.review_feedback,
+    nested?.reviewFeedback,
   ]) {
     if (typeof value === 'string' && value.trim()) return value.trim();
   }

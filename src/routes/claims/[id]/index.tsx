@@ -6,7 +6,7 @@ import TopNavLayout from '@/layouts/TopNavLayout';
 import AiGeneratedBanner from '@/components/AiGeneratedBanner';
 import InfoTooltipTrigger from '@/components/InfoTooltipTrigger';
 import { AiStatusChip } from '@/components/StatusChip';
-import { getClaimAgents, getClaimSummary, getClaimTrace, updateClaimReviewStatus, approveClaimReview, rejectClaimReview } from '@/lib/execute';
+import { getClaimAgents, getClaimSummary, getClaimTrace, getRun, updateClaimReviewStatus, approveClaimReview, rejectClaimReview } from '@/lib/execute';
 import { processFor } from '@/lib/process';
 import { aggregateTraceAudit, readFeedbackFromRecord, readReviewStatusRaw, reviewWorkflowStatusOrDefault, reviewWorkflowStatusLabel } from '@/lib/status';
 import { useLiveClaimRun, liveShapeToAgent } from '@/lib/useLiveClaimRun';
@@ -596,6 +596,16 @@ export default function ClaimDetailsPage() {
     },
   });
 
+  const effectiveRunIdForQuery = runId ?? listPreview?.runId ?? '';
+
+  const runQuery = useQuery({
+    queryKey: ['claim-run', effectiveRunIdForQuery],
+    queryFn: () => getRun(token!, effectiveRunIdForQuery),
+    enabled: !!token && !!effectiveRunIdForQuery,
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
+  });
+
   // Warm agents + trace in the background once summary confirms a finished run.
   useEffect(() => {
     if (!token || !claimId) return;
@@ -697,8 +707,9 @@ export default function ClaimDetailsPage() {
     () =>
       readFeedbackFromRecord(summaryQuery.data as Record<string, unknown> | null | undefined)
       ?? readFeedbackFromRecord(agentsQuery.data as Record<string, unknown> | null | undefined)
+      ?? readFeedbackFromRecord(runQuery.data as Record<string, unknown> | null | undefined)
       ?? (listPreview?.feedback?.trim() || undefined),
-    [summaryQuery.data, agentsQuery.data, listPreview?.feedback],
+    [summaryQuery.data, agentsQuery.data, runQuery.data, listPreview?.feedback],
   );
 
   const savedFeedback = savedFeedbackOverride ?? feedbackFromApi ?? '';
@@ -723,6 +734,7 @@ export default function ClaimDetailsPage() {
       setReviewWorkflowStatusOverride('in_progress');
       void queryClient.invalidateQueries({ queryKey: ['claim-summary', claimId] });
       void queryClient.invalidateQueries({ queryKey: ['claim-agents', claimId] });
+      void queryClient.invalidateQueries({ queryKey: ['claim-run'] });
       void queryClient.invalidateQueries({ queryKey: ['runs'] });
     },
     onError: (err) => {
@@ -740,6 +752,7 @@ export default function ClaimDetailsPage() {
   const invalidateClaimQueries = () => {
     void queryClient.invalidateQueries({ queryKey: ['claim-summary', claimId] });
     void queryClient.invalidateQueries({ queryKey: ['claim-agents', claimId] });
+    void queryClient.invalidateQueries({ queryKey: ['claim-run'] });
     void queryClient.invalidateQueries({ queryKey: ['runs'] });
   };
 
@@ -781,11 +794,8 @@ export default function ClaimDetailsPage() {
   });
 
   const reviewActionPending = approveMutation.isPending || rejectMutation.isPending;
-  const showReviewActions = reviewWorkflowStatus === 'in_progress';
-  const showSavedFeedback =
-    claimDataLoaded
-    && reviewWorkflowStatus === 'completed'
-    && !!savedFeedback.trim();
+  const showFeedbackComposer = claimDataLoaded && reviewWorkflowStatus === 'in_progress';
+  const showFeedbackReadOnly = claimDataLoaded && reviewWorkflowStatus === 'completed';
 
   const renderNavContent = () => {
     if (activeNav === 'agents') {
@@ -1097,7 +1107,7 @@ export default function ClaimDetailsPage() {
         </div>
       </div>
 
-      <div className="h-[calc(100vh-6.5rem)] min-h-0 border border-[#FF612B]/60 rounded-sm bg-white overflow-hidden flex flex-col">
+      <div className="min-h-[320px] max-h-[calc(100vh-20rem)] border border-[#FF612B]/60 rounded-sm bg-white overflow-hidden flex flex-col">
         <div className="flex flex-1 min-h-0">
           <div className="w-[220px] shrink-0 flex flex-col border-r border-[#e8ddd4] bg-white self-stretch">
             {LEFT_NAV_ITEMS.map((item) => {
@@ -1149,62 +1159,67 @@ export default function ClaimDetailsPage() {
         </div>
       </div>
 
-      {showReviewActions && (
+      {(showFeedbackComposer || showFeedbackReadOnly) && (
         <div className="mt-5 shrink-0 border border-[#e8ddd4] rounded-sm px-4 py-4 bg-[#fafafa]">
           <label className="block text-sm font-medium text-gray-800 mb-2">
-            Feedback: <span className="text-red-500">*</span>
-            <span className="text-xs font-normal text-gray-500 ml-1">(required for reject)</span>
+            Feedback
+            {showFeedbackComposer ? (
+              <>
+                : <span className="text-red-500">*</span>
+                <span className="text-xs font-normal text-gray-500 ml-1">(required for reject)</span>
+              </>
+            ) : null}
           </label>
-          <textarea
-            value={feedback}
-            onChange={(e) => {
-              setFeedback(e.target.value);
-              if (reviewActionError) setReviewActionError(null);
-            }}
-            rows={3}
-            disabled={reviewActionPending}
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded bg-white resize-none focus:outline-none focus:ring-1 focus:ring-[#FF612B] focus:border-[#FF612B] disabled:opacity-60"
-          />
-          {reviewActionError ? (
-            <p className="mt-2 text-sm text-red-600">{reviewActionError}</p>
-          ) : null}
-          <div className="flex justify-end gap-3 mt-3">
-            <button
-              type="button"
-              onClick={() => approveMutation.mutate(feedback.trim())}
-              disabled={reviewActionPending}
-              className="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white bg-[#2e9e5e] hover:bg-[#27854f] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
-            >
-              {approveMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Check className="h-4 w-4" />
-              )}
-              Approve
-            </button>
-            <button
-              type="button"
-              onClick={() => rejectMutation.mutate(feedback.trim())}
-              disabled={reviewActionPending || !feedback.trim()}
-              className="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white bg-[#d32f2f] hover:bg-[#b71c1c] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
-            >
-              {rejectMutation.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <X className="h-4 w-4" />
-              )}
-              Reject
-            </button>
-          </div>
-        </div>
-      )}
 
-      {showSavedFeedback && (
-        <div className="mt-5 shrink-0 border border-[#e8ddd4] rounded-sm px-4 py-4 bg-[#fafafa]">
-          <label className="block text-sm font-medium text-gray-800 mb-2">Feedback</label>
-          <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap rounded border border-gray-200 bg-white px-3 py-2.5">
-            {savedFeedback}
-          </p>
+          {showFeedbackComposer ? (
+            <>
+              <textarea
+                value={feedback}
+                onChange={(e) => {
+                  setFeedback(e.target.value);
+                  if (reviewActionError) setReviewActionError(null);
+                }}
+                rows={3}
+                disabled={reviewActionPending}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded bg-white resize-none focus:outline-none focus:ring-1 focus:ring-[#FF612B] focus:border-[#FF612B] disabled:opacity-60"
+              />
+              {reviewActionError ? (
+                <p className="mt-2 text-sm text-red-600">{reviewActionError}</p>
+              ) : null}
+              <div className="flex justify-end gap-3 mt-3">
+                <button
+                  type="button"
+                  onClick={() => approveMutation.mutate(feedback.trim())}
+                  disabled={reviewActionPending}
+                  className="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white bg-[#2e9e5e] hover:bg-[#27854f] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
+                >
+                  {approveMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Check className="h-4 w-4" />
+                  )}
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  onClick={() => rejectMutation.mutate(feedback.trim())}
+                  disabled={reviewActionPending || !feedback.trim()}
+                  className="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white bg-[#d32f2f] hover:bg-[#b71c1c] disabled:opacity-50 disabled:cursor-not-allowed rounded transition-colors"
+                >
+                  {rejectMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <X className="h-4 w-4" />
+                  )}
+                  Reject
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap rounded border border-gray-200 bg-white px-3 py-2.5">
+              {savedFeedback.trim() || '—'}
+            </p>
+          )}
         </div>
       )}
       </div>
