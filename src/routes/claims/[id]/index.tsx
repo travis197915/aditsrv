@@ -382,7 +382,7 @@ function AgentCard({
                 </div>
                 <h4 className="text-sm font-semibold text-gray-900 mb-3">Process Summary</h4>
                 <ul className="space-y-2 list-disc pl-5">
-                  {agent.processSummary.map((point, i) => (
+                  {(agent.processSummary ?? []).map((point, i) => (
                     <li key={i} className="text-sm text-gray-700 leading-relaxed">
                       {point}
                     </li>
@@ -984,14 +984,14 @@ export default function ClaimDetailsPage() {
         {summaryAgents.length === 0 ? (
           <div className="text-sm text-gray-500 py-4">No process summary available yet.</div>
         ) : (
-          summaryAgents.map((agent) => (
-            <div key={agent.id}>
+          summaryAgents.map((agent, agentIndex) => (
+            <div key={agent.id || `${agent.agentName}-${agentIndex}`}>
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-sm font-semibold text-gray-900">{agent.agentName}</span>
                 <AiStatusChip status={agent.status} />
               </div>
               <ul className="space-y-2 list-disc pl-5">
-                {agent.processSummary.map((point, i) => (
+                {(agent.processSummary ?? []).map((point, i) => (
                   <li key={i} className="text-sm text-gray-700 leading-relaxed">
                     {point}
                   </li>
@@ -1107,9 +1107,9 @@ export default function ClaimDetailsPage() {
         </div>
       </div>
 
-      <div className="min-h-[320px] max-h-[calc(100vh-20rem)] border border-[#FF612B]/60 rounded-sm bg-white overflow-hidden flex flex-col">
-        <div className="flex flex-1 min-h-0">
-          <div className="w-[220px] shrink-0 flex flex-col border-r border-[#e8ddd4] bg-white self-stretch">
+      <div className="h-[calc(100vh-20rem)] min-h-[360px] border border-[#FF612B]/60 rounded-sm bg-white overflow-hidden flex flex-col">
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <div className="w-[220px] shrink-0 flex flex-col border-r border-[#e8ddd4] bg-white self-stretch overflow-y-auto">
             {LEFT_NAV_ITEMS.map((item) => {
               const isActive = activeNav === item.id;
               const isLoading =
@@ -1151,11 +1151,9 @@ export default function ClaimDetailsPage() {
             })}
           </div>
 
-          <div className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
-            <div className="flex-1 h-0 overflow-y-auto overscroll-y-contain p-4">
+          <div className="flex-1 min-w-0 min-h-0 overflow-y-auto overscroll-y-contain p-4">
               {renderNavContent()}
             </div>
-          </div>
         </div>
       </div>
 

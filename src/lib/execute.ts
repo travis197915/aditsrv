@@ -1,4 +1,5 @@
 import { API_BASE, ApiError } from '@/lib/api';
+import { normalizeClaimAgentsSnapshot, normalizeClaimSummarySnapshot } from '@/lib/claim-snapshot';
 import { clearAuth } from '@/utils/auth';
 import { buildLoginPath } from '@/utils/redirect';
 import type {
@@ -212,7 +213,8 @@ export async function getClaimSummary(
     handleUnauthorized(res);
     return null;
   }
-  return checkResponse<ClaimSummarySnapshot>(res, `claim summary failed (${res.status})`);
+  const payload = await checkResponse<unknown>(res, `claim summary failed (${res.status})`);
+  return normalizeClaimSummarySnapshot(payload);
 }
 
 export async function getClaimAgents(
@@ -228,7 +230,8 @@ export async function getClaimAgents(
     handleUnauthorized(res);
     return null;
   }
-  return checkResponse<ClaimAgentsSnapshot>(res, `claim agents failed (${res.status})`);
+  const payload = await checkResponse<unknown>(res, `claim agents failed (${res.status})`);
+  return normalizeClaimAgentsSnapshot(payload);
 }
 
 export async function getClaimProcessing(
