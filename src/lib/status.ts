@@ -161,10 +161,128 @@ export function readFeedbackFromRecord(
   return undefined;
 }
 
+function firstNonEmptyString(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+/** Claim audited date from a processed run / list row (date portion for table display). */
+export function readClaimAuditedDateFromRecord(
+  record: Record<string, unknown> | null | undefined,
+): string {
+  if (!record) return '';
+
+  const nested =
+    record.claim && typeof record.claim === 'object'
+      ? (record.claim as Record<string, unknown>)
+      : undefined;
+
+  const candidates: unknown[] = [
+    record.reviewed_at_date,
+    record.reviewedAtDate,
+    record.claim_audited_date,
+    record.claimAuditedDate,
+    record.audited_date,
+    record.auditedDate,
+    record.auditor_review_date,
+    record.auditorReviewDate,
+    record.review_completed_date,
+    record.reviewCompletedDate,
+    record.review_completed_at_date,
+    record.reviewCompletedAtDate,
+    record.audited_at_date,
+    record.auditedAtDate,
+    nested?.reviewed_at_date,
+    nested?.reviewedAtDate,
+    nested?.claim_audited_date,
+    nested?.claimAuditedDate,
+    nested?.audited_date,
+    nested?.auditedDate,
+    nested?.review_completed_date,
+    nested?.reviewCompletedDate,
+  ];
+
+  const dateOnly = firstNonEmptyString(...candidates);
+  if (dateOnly) return dateOnly;
+
+  const datePart = firstNonEmptyString(
+    record.claim_audited_at_date,
+    record.claimAuditedAtDate,
+    nested?.claim_audited_at_date,
+    nested?.claimAuditedAtDate,
+  );
+  const timePart = firstNonEmptyString(
+    record.reviewed_at,
+    record.reviewedAt,
+    record.claim_audited_at,
+    record.claimAuditedAt,
+    record.audited_at,
+    record.auditedAt,
+    record.review_completed_at,
+    record.reviewCompletedAt,
+    record.auditor_reviewed_at,
+    record.auditorReviewedAt,
+    nested?.reviewed_at,
+    nested?.reviewedAt,
+    nested?.claim_audited_at,
+    nested?.claimAuditedAt,
+    nested?.audited_at,
+    nested?.review_completed_at,
+  );
+
+  if (datePart && timePart) return `${datePart} ${timePart}`;
+  return timePart || datePart;
+}
+
 export function reviewWorkflowStatusLabel(status: ReviewWorkflowStatus): string {
   switch (status) {
     case 'pending': return 'Pending';
     case 'in_progress': return 'In Progress';
     case 'completed': return 'Completed';
   }
+}
+
+export type ReviewOutcome = 'APPROVED' | 'REJECTED';
+
+/** Approve/reject outcome when review workflow is completed. */
+export function readReviewOutcome(
+  raw: string | null | undefined,
+): ReviewOutcome | undefined {
+  const s = String(raw ?? '').trim().toLowerCase().replace(/-/g, '_');
+  if (s === 'approved' || s === 'approve') return 'APPROVED';
+  if (s === 'rejected' || s === 'reject') return 'REJECTED';
+  return undefined;
+}
+
+export function readReviewOutcomeFromRecord(
+  record: Record<string, unknown> | null | undefined,
+): ReviewOutcome | undefined {
+  if (!record) return undefined;
+
+  const nested =
+    record.claim && typeof record.claim === 'object'
+      ? (record.claim as Record<string, unknown>)
+      : undefined;
+
+  for (const value of [
+    record.review_status,
+    record.reviewStatus,
+    record.auditor_review_status,
+    record.auditorReviewStatus,
+    record.auditor_status,
+    record.auditorStatus,
+    nested?.review_status,
+    nested?.reviewStatus,
+    nested?.auditor_status,
+    nested?.auditorStatus,
+  ]) {
+    const outcome = readReviewOutcome(
+      typeof value === 'string' ? value : undefined,
+    );
+    if (outcome) return outcome;
+  }
+
+  return undefined;
 }

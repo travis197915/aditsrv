@@ -5,10 +5,10 @@ import { ChevronDown, ChevronUp, Clock, Check, X, Loader2, Play } from 'lucide-r
 import TopNavLayout from '@/layouts/TopNavLayout';
 import AiGeneratedBanner from '@/components/AiGeneratedBanner';
 import InfoTooltipTrigger from '@/components/InfoTooltipTrigger';
-import { AiStatusChip } from '@/components/StatusChip';
+import { AiStatusChip, ReviewWorkflowStatusCell } from '@/components/StatusChip';
 import { getClaimAgents, getClaimSummary, getClaimTrace, getRun, updateClaimReviewStatus, approveClaimReview, rejectClaimReview } from '@/lib/execute';
 import { processFor } from '@/lib/process';
-import { aggregateTraceAudit, readFeedbackFromRecord, readReviewStatusRaw, reviewWorkflowStatusOrDefault, reviewWorkflowStatusLabel } from '@/lib/status';
+import { aggregateTraceAudit, readFeedbackFromRecord, readReviewStatusRaw, reviewWorkflowStatusOrDefault } from '@/lib/status';
 import { useLiveClaimRun, liveShapeToAgent } from '@/lib/useLiveClaimRun';
 import type {
   ClaimProcessingAgent,
@@ -538,10 +538,12 @@ export default function ClaimDetailsPage() {
   const [reviewActionError, setReviewActionError] = useState<string | null>(null);
   const [reviewWorkflowStatusOverride, setReviewWorkflowStatusOverride] =
     useState<ReviewWorkflowStatus | null>(null);
+  const [reviewStatusRawOverride, setReviewStatusRawOverride] = useState<string | null>(null);
   const [startProcessError, setStartProcessError] = useState<string | null>(null);
 
   useEffect(() => {
     setReviewWorkflowStatusOverride(null);
+    setReviewStatusRawOverride(null);
     setStartProcessError(null);
     setReviewActionError(null);
     setFeedback('');
@@ -703,6 +705,16 @@ export default function ClaimDetailsPage() {
     ?? reviewWorkflowStatusFromApi
     ?? (claimDataLoaded ? 'pending' : undefined);
 
+  const reviewStatusRawFromApi = useMemo(
+    () =>
+      readReviewStatusRaw(summaryQuery.data as Record<string, unknown> | null | undefined)
+      ?? readReviewStatusRaw(agentsQuery.data as Record<string, unknown> | null | undefined)
+      ?? readReviewStatusRaw(runQuery.data as Record<string, unknown> | null | undefined),
+    [summaryQuery.data, agentsQuery.data, runQuery.data],
+  );
+
+  const reviewStatusRaw = reviewStatusRawOverride ?? reviewStatusRawFromApi;
+
   const feedbackFromApi = useMemo(
     () =>
       readFeedbackFromRecord(summaryQuery.data as Record<string, unknown> | null | undefined)
@@ -765,6 +777,7 @@ export default function ClaimDetailsPage() {
     onSuccess: (submitted) => {
       setReviewActionError(null);
       setReviewWorkflowStatusOverride('completed');
+      setReviewStatusRawOverride('approved');
       setSavedFeedbackOverride(submitted);
       setFeedback('');
       invalidateClaimQueries();
@@ -784,6 +797,7 @@ export default function ClaimDetailsPage() {
     onSuccess: (submitted) => {
       setReviewActionError(null);
       setReviewWorkflowStatusOverride('completed');
+      setReviewStatusRawOverride('rejected');
       setSavedFeedbackOverride(submitted);
       setFeedback('');
       invalidateClaimQueries();
@@ -1083,17 +1097,10 @@ export default function ClaimDetailsPage() {
           {!claimDataLoaded ? (
             <span className="text-sm text-gray-400">—</span>
           ) : reviewWorkflowStatus ? (
-            <span
-              className={`inline-flex items-center px-2.5 py-0.5 text-xs font-semibold rounded border ${
-                reviewWorkflowStatus === 'in_progress'
-                  ? 'bg-amber-50 text-amber-800 border-amber-200'
-                  : reviewWorkflowStatus === 'completed'
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                    : 'bg-gray-50 text-gray-700 border-gray-200'
-              }`}
-            >
-              {reviewWorkflowStatusLabel(reviewWorkflowStatus)}
-            </span>
+            <ReviewWorkflowStatusCell
+              status={reviewWorkflowStatus}
+              rawStatus={reviewStatusRaw}
+            />
           ) : (
             <span className="text-sm text-gray-400">—</span>
           )}

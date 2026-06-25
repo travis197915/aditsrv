@@ -59,6 +59,18 @@ export interface RunSummary {
   started_at_date?: string;
   finished_at?: string;
   finished_at_date?: string;
+  claim_audited_date?: string;
+  claimAuditedDate?: string;
+  audited_date?: string;
+  audited_at?: string;
+  audited_at_date?: string;
+  review_completed_at?: string;
+  review_completed_date?: string;
+  review_completed_at_date?: string;
+  reviewed_at?: string;
+  reviewedAt?: string;
+  reviewed_at_date?: string;
+  reviewedAtDate?: string;
   review_status?: string;
   reviewStatus?: string;
   auditor_status?: string;

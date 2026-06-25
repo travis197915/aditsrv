@@ -2,6 +2,7 @@ import { CheckCircle2, Clock, Flag, Play, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   normalizeAuditStatus,
+  readReviewOutcome,
   type AuditStatus,
   type ReviewWorkflowStatus,
 } from '@/lib/status';
@@ -95,6 +96,62 @@ export function ReviewWorkflowStatusChip({ status }: { status: ReviewWorkflowSta
   return <StatusChipBase style={REVIEW_WORKFLOW_STATUS[status]} />;
 }
 
-export function ReviewWorkflowStatusCell({ status }: { status: ReviewWorkflowStatus | undefined }) {
-  return <ReviewWorkflowStatusChip status={status ?? 'pending'} />;
+export function ReviewWorkflowStatusCell({
+  status,
+  rawStatus,
+}: {
+  status: ReviewWorkflowStatus | undefined;
+  rawStatus?: string;
+}) {
+  const workflow = status ?? 'pending';
+  const outcome = workflow === 'completed' ? readReviewOutcome(rawStatus) : undefined;
+  if (outcome) return <ReviewStatusChip status={outcome} />;
+  return <ReviewWorkflowStatusChip status={workflow} />;
+}
+
+function normalizeAuditorStatusKey(raw: string): string {
+  return String(raw ?? '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+}
+
+/** Auditor status chip — approve/reject use the same palette as platform status chips. */
+export function AuditorStatusChip({ status }: { status: string }) {
+  const key = normalizeAuditorStatusKey(status);
+
+  if (key === 'APPROVED' || key === 'APPROVE') {
+    return <ReviewStatusChip status="APPROVED" />;
+  }
+  if (key === 'REJECTED' || key === 'REJECT') {
+    return <ReviewStatusChip status="REJECTED" />;
+  }
+  if (key === 'PENDING') {
+    return <ReviewStatusChip status="PENDING" />;
+  }
+  if (key === 'AUDITED') {
+    return (
+      <StatusChipBase
+        style={{
+          label: 'AUDITED',
+          icon: AI_STATUS.INCONCLUSIVE.icon,
+          className: AI_STATUS.INCONCLUSIVE.className,
+        }}
+      />
+    );
+  }
+  if (key === 'CLEAN' || key === 'DEFECT' || key === 'INCONCLUSIVE' || key === 'MET' || key === 'NOTMET') {
+    return <AiStatusChip status={status} />;
+  }
+
+  if (!key) {
+    return <span className="text-gray-500">—</span>;
+  }
+
+  return (
+    <StatusChipBase
+      style={{
+        label: status.trim().toUpperCase(),
+        icon: Clock,
+        className: 'bg-gray-100 text-gray-600 border-gray-200',
+      }}
+    />
+  );
 }

@@ -6,14 +6,14 @@ import {
   Newspaper, TrendingUp, Clock, FileText, Eye,
 } from 'lucide-react';
 import TopNavLayout from '@/layouts/TopNavLayout';
-import { AiStatusChip, ReviewWorkflowStatusCell } from '@/components/StatusChip';
+import { AiStatusChip, AuditorStatusChip, ReviewWorkflowStatusCell } from '@/components/StatusChip';
 import { TableColumnHeaderLabel } from '@/components/InfoTooltipTrigger';
 import DateFilterInput from '@/components/DateFilterInput';
 import RunBatchModal from '@/components/RunBatchModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { listProcessedRuns } from '@/lib/execute';
 import { getToken } from '@/utils/auth';
-import { normalizeAuditStatus, decisionToAuditStatus, readFeedbackFromRecord, reviewWorkflowStatusFromRun } from '@/lib/status';
+import { normalizeAuditStatus, decisionToAuditStatus, readClaimAuditedDateFromRecord, readFeedbackFromRecord, reviewWorkflowStatusFromRun } from '@/lib/status';
 import type { ClaimStatus, ReviewWorkflowStatus, RunSummary } from '@/types/execute';
 
 type BatchTableRow = {
@@ -22,12 +22,14 @@ type BatchTableRow = {
   batchId: string;
   claimStatus: ClaimStatus;
   reviewStatus: ReviewWorkflowStatus;
+  reviewStatusRaw: string;
   feedback: string;
   runStatus: string;
   processingTimeMin: number;
   startedAt: string;
   finishedAt: string;
   finishedAtDate: string;
+  claimAuditedDate: string;
   auditorStatus: string;
   auditedErrorCategory: string;
   auditedErrorDescription: string;
@@ -95,20 +97,20 @@ function AuditorStatusCell({ row }: { row: BatchTableRow }) {
 
   return (
     <div className="relative inline-block">
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          if (hasDetails) setOpen((o) => !o);
-        }}
-        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap ${
-          hasDetails
-            ? 'bg-[#ede4f5] text-[#581c87] border-[#b794c9] cursor-pointer hover:brightness-95'
-            : 'bg-gray-100 text-gray-600 border-gray-200'
-        }`}
-      >
-        {label || 'AUDITED'}
-      </button>
+      {hasDetails ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen((o) => !o);
+          }}
+          className="cursor-pointer hover:brightness-95"
+        >
+          <AuditorStatusChip status={label || 'AUDITED'} />
+        </button>
+      ) : (
+        <AuditorStatusChip status={label || 'AUDITED'} />
+      )}
 
       {open && hasDetails && (
         <>
@@ -154,6 +156,12 @@ function mapRunToRow(run: RunSummary, idx: number): BatchTableRow {
     batchId,
     claimStatus: deriveClaimStatus(run),
     reviewStatus: deriveReviewWorkflowStatus(run),
+    reviewStatusRaw: firstString(
+      run.review_status,
+      run.reviewStatus,
+      run.auditor_status,
+      run.auditorStatus,
+    ),
     feedback: readFeedbackFromRecord(run as Record<string, unknown>) ?? '',
     runStatus: String(run.run_status ?? run.status ?? ''),
     processingTimeMin: Number(run.processing_time_min ?? run.transaction_time_min ?? 0),
@@ -164,6 +172,7 @@ function mapRunToRow(run: RunSummary, idx: number): BatchTableRow {
       ? `${run.finished_at_date} ${run.finished_at}`
       : String(run.finished_at_date ?? run.finished_at ?? ''),
     finishedAtDate: String(run.finished_at_date ?? ''),
+    claimAuditedDate: readClaimAuditedDateFromRecord(run as Record<string, unknown>),
     auditorStatus: firstString(run.auditor_status, run.audited_status),
     auditedErrorCategory: firstString(
       run.audited_error_category,
@@ -500,7 +509,7 @@ export default function ClaimsListingPage() {
                       <td className="px-3 py-2 text-gray-500 whitespace-nowrap">—</td>
                       <td className="px-3 py-2 text-gray-500 whitespace-nowrap">—</td>
                       <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.finishedAtDate || '—'}</td>
-                      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">—</td>
+                      <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{row.claimAuditedDate || '—'}</td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         <AuditorStatusCell row={row} />
                       </td>
@@ -508,7 +517,10 @@ export default function ClaimsListingPage() {
                         <AiStatusChip status={row.claimStatus} />
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap">
-                        <ReviewWorkflowStatusCell status={row.reviewStatus} />
+                        <ReviewWorkflowStatusCell
+                          status={row.reviewStatus}
+                          rawStatus={row.reviewStatusRaw}
+                        />
                       </td>
                       <td className="px-3 py-2 text-gray-600 tabular-nums">{row.processingTimeMin}</td>
                       <td className="px-3 py-2 text-gray-500">%</td>
