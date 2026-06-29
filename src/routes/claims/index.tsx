@@ -14,6 +14,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { listProcessedRuns } from '@/lib/execute';
 import { getToken } from '@/utils/auth';
 import { normalizeAuditStatus, decisionToAuditStatus, readClaimAuditedDateFromRecord, readFeedbackFromRecord, reviewWorkflowStatusFromRun } from '@/lib/status';
+import { normalizeLobLabel } from '@/lib/claim-snapshot';
 import type { ClaimStatus, ReviewWorkflowStatus, RunSummary } from '@/types/execute';
 
 type BatchTableRow = {
@@ -25,6 +26,7 @@ type BatchTableRow = {
   reviewStatusRaw: string;
   feedback: string;
   runStatus: string;
+  lobLabel: string;
   processingTimeMin: number;
   startedAt: string;
   finishedAt: string;
@@ -164,6 +166,7 @@ function mapRunToRow(run: RunSummary, idx: number): BatchTableRow {
     ),
     feedback: readFeedbackFromRecord(run as Record<string, unknown>) ?? '',
     runStatus: String(run.run_status ?? run.status ?? ''),
+    lobLabel: normalizeLobLabel(run as Record<string, unknown>),
     processingTimeMin: Number(run.processing_time_min ?? run.transaction_time_min ?? 0),
     startedAt: run.started_at_date && run.started_at
       ? `${run.started_at_date} ${run.started_at}`

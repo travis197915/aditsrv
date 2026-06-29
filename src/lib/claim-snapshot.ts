@@ -41,6 +41,21 @@ export function normalizeStringArray(value: unknown): string[] {
   return [];
 }
 
+/** Resolve the claim's Line of Business label from a run/header payload.
+ *  Accepts the flat ``lobLabel``/``lob_label`` or derives it from the nested
+ *  ``claimLob``/``claim_lob`` object the engine persists. */
+export function normalizeLobLabel(obj: Record<string, unknown>): string {
+  const flat = obj.lobLabel ?? obj.lob_label;
+  if (typeof flat === 'string' && flat.trim()) return flat.trim();
+  const lobObj = asRecord(obj.claimLob ?? obj.claim_lob);
+  const label = lobObj.label;
+  if (typeof label === 'string' && label.trim()) return label.trim();
+  const product = typeof lobObj.product === 'string' ? lobObj.product.trim() : '';
+  const network = typeof lobObj.network === 'string' ? lobObj.network.trim() : '';
+  if (product && network && network !== 'UNKNOWN') return `${product} ${network}`;
+  return product;
+}
+
 function normalizeRunHeader(obj: Record<string, unknown>) {
   return {
     claimId: String(obj.claimId ?? obj.claim_id ?? ''),
@@ -48,6 +63,7 @@ function normalizeRunHeader(obj: Record<string, unknown>) {
     batchId: String(obj.batchId ?? obj.batch_id ?? ''),
     workflowId: String(obj.workflowId ?? obj.workflow_id ?? ''),
     claimStatus: normalizeAuditStatus(String(obj.claimStatus ?? obj.claim_status ?? '')) as ClaimStatus,
+    lobLabel: normalizeLobLabel(obj),
     processingTimeMin: Number(obj.processingTimeMin ?? obj.processing_time_min ?? 0),
     startedAt: String(obj.startedAt ?? obj.started_at ?? ''),
     finishedAt: String(obj.finishedAt ?? obj.finished_at ?? ''),

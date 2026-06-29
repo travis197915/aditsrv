@@ -452,6 +452,7 @@ type ClaimListPreview = {
   reviewStatus?: ReviewWorkflowStatus;
   feedback?: string;
   runStatus: string;
+  lobLabel?: string;
   processingTimeMin: number;
   startedAt: string;
   finishedAt: string;
@@ -681,6 +682,7 @@ export default function ClaimDetailsPage() {
           batchId: listPreview.batchId,
           claimStatus: listPreview.claimStatus,
           runStatus: listPreview.runStatus,
+          lobLabel: listPreview.lobLabel ?? '',
           processingTimeMin: listPreview.processingTimeMin,
           finishedAt: listPreview.finishedAt,
           startedAt: listPreview.startedAt,
@@ -1082,7 +1084,7 @@ export default function ClaimDetailsPage() {
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Lob :</div>
-          <div className="text-sm text-gray-800">—</div>
+          <div className="text-sm text-gray-800">{header?.lobLabel || '—'}</div>
         </div>
         <div>
           <div className="text-sm text-gray-600 mb-1">Claim Status :</div>

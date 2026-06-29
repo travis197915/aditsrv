@@ -206,6 +206,8 @@ export interface ClaimRunHeader {
   batchId: string;
   workflowId: string;
   claimStatus: ClaimStatus;
+  /** Identified Line of Business, e.g. "Commercial OON" ("" when unknown). */
+  lobLabel: string;
   processingTimeMin: number;
   startedAt: string;
   finishedAt: string;
